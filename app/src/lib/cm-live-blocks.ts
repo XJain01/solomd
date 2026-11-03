@@ -805,6 +805,45 @@ class PlantumlWidget extends WidgetType {
   }
 }
 
+/**
+ * Hold the note scroller still while the pointer is on an embedded board.
+ * tldraw's text editor scrolls every ancestor to reveal its caret; that
+ * reads as the whole page jumping to the top.
+ */
+function pinNoteScroll(card: HTMLElement): () => void {
+  let lockTop: number | null = null;
+  let timer: number | null = null;
+  const scrollerOf = () => card.closest('.cm-scroller') as HTMLElement | null;
+  const onScroll = () => {
+    const scroller = scrollerOf();
+    if (!scroller || lockTop == null) return;
+    if (Math.abs(scroller.scrollTop - lockTop) > 1) scroller.scrollTop = lockTop;
+  };
+  const arm = () => {
+    const scroller = scrollerOf();
+    if (!scroller) return;
+    lockTop = scroller.scrollTop;
+    scroller.addEventListener('scroll', onScroll);
+  };
+  const disarm = () => {
+    const scroller = scrollerOf();
+    lockTop = null;
+    scroller?.removeEventListener('scroll', onScroll);
+  };
+  const hold = () => {
+    arm();
+    if (timer != null) window.clearTimeout(timer);
+    // Outlast the 350ms snapshot writeback, which replaces the document.
+    timer = window.setTimeout(disarm, 500);
+  };
+  card.addEventListener('pointerdown', hold);
+  return () => {
+    card.removeEventListener('pointerdown', hold);
+    if (timer != null) window.clearTimeout(timer);
+    disarm();
+  };
+}
+
 // v4.6 F7 — ```tldraw fenced whiteboard. Unlike mermaid (which collapses only
 // when the cursor leaves), the board ALWAYS replaces the fence: the JSON is
 // never meant to be hand-edited. The widget mounts a LIVE tldraw editor via the
@@ -846,6 +885,26 @@ class TldrawWidget extends WidgetType {
       other.width === this.width &&
       other.snapshot === this.snapshot
     );
+  }
+
+  /**
+   * A board edit writes the snapshot back into the note, which rebuilds this
+   * decoration. Remounting tldraw for that echo collapses the block and the
+   * editor scroller jumps to the top. Keep the live instance and only reload
+   * when the stored snapshot is actually different from what the board has.
+   */
+  updateDOM(dom: HTMLElement, _view: EditorView, from: TldrawWidget): boolean {
+    if (from.boardId !== this.boardId || from.height !== this.height || from.width !== this.width) {
+      return false;
+    }
+    const handle = (dom as unknown as {
+      __boardHandle?: { getSnapshotString(): string; loadSnapshot(snapshot: string): void };
+    }).__boardHandle;
+    if (handle && this.snapshot !== from.snapshot) {
+      const live = handle.getSnapshotString?.() ?? '';
+      if (live !== this.snapshot) handle.loadSnapshot(this.snapshot);
+    }
+    return true;
   }
 
   toDOM(): HTMLElement {
@@ -900,6 +959,10 @@ class TldrawWidget extends WidgetType {
     const surface = document.createElement('div');
     surface.className = 'cm-tldraw-surface';
     card.appendChild(surface);
+    // ProseMirror (tldraw's text editor) walks every scrollable ancestor and
+    // calls scrollIntoView. While the pointer is on the board, pin the note's
+    // scroller so a shape edit can't throw the page back to the top.
+    const releaseScrollLock = pinNoteScroll(card);
 
     const placeholder = document.createElement('div');
     placeholder.className = 'cm-tldraw-loading';
@@ -955,6 +1018,7 @@ class TldrawWidget extends WidgetType {
     // Stash a teardown hook the widget's destroy() path can call.
     (wrap as unknown as { __destroyBoard?: () => void }).__destroyBoard = () => {
       destroyed = true;
+      releaseScrollLock();
       const handle = (wrap as unknown as { __boardHandle?: { destroy(): void } })
         .__boardHandle;
       try {
@@ -1769,7 +1833,10 @@ export const liveBlocksTheme = EditorView.theme({
     width: '100%',
   },
   '.cm-tldraw-card': {
-    position: 'relative',
+    // sticky (no inset) lays out like relative, but ProseMirror's ancestor
+    // scroll walk stops at sticky/fixed — so board text edits don't scroll
+    // the note.
+    position: 'sticky',
     width: '100%',
     border: '1px solid var(--border)',
     borderRadius: '8px',

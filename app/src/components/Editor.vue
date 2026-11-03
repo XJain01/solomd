@@ -555,8 +555,8 @@ const renderDepsVersion = useRenderDepsVersion();
 // stable while the pane is temporarily hidden in 'preview' or 'reading' mode so
 // neither the Windows block editor nor CodeMirror's live-edit compartment unmounts
 // or resets its undo/redo stack or scroll layout.
-const activeEditorViewMode = ref<'edit' | 'liveEdit' | 'split'>(
-  settings.viewMode === 'edit' || settings.viewMode === 'liveEdit' || settings.viewMode === 'split'
+const activeEditorViewMode = ref<'edit' | 'liveEdit' | 'split' | 'agent'>(
+  settings.viewMode === 'edit' || settings.viewMode === 'liveEdit' || settings.viewMode === 'split' || settings.viewMode === 'agent'
     ? settings.viewMode
     : 'liveEdit',
 );
@@ -5663,10 +5663,22 @@ watch(
       // truth; a skipped write is re-reconciled by the next content sync.)
       if (view.composing) return;
       const head = Math.min(view.state.selection.main.head, next.length);
+      // A whiteboard writeback replaces the fence JSON. A full-document
+      // replace otherwise drops the scroller back to the top.
+      const scrollTop = view.scrollDOM.scrollTop;
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: next },
         selection: { anchor: head },
+        scrollIntoView: false,
       });
+      const keep = () => {
+        if (!view) return;
+        if (Math.abs(view.scrollDOM.scrollTop - scrollTop) > 1) {
+          view.scrollDOM.scrollTop = scrollTop;
+        }
+      };
+      keep();
+      requestAnimationFrame(keep);
     }
   }
 );
