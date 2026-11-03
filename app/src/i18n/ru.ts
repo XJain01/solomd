@@ -160,6 +160,7 @@ export const ru: I18n = {
     segSource: "Исходник",
     segSplit: "Разделить",
     segPreview: "Просмотр",
+    segAgent: "Агент",
     viewModes: "Режим просмотра",
     more: "Ещё",
     insert: "Вставить",

@@ -160,6 +160,7 @@ export const fr: I18n = {
     segSource: "Source",
     segSplit: "Côte à côte",
     segPreview: "Aperçu",
+    segAgent: "Agent",
     viewModes: "Mode d’affichage",
     more: "Plus",
     insert: "Insérer",

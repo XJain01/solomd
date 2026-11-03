@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue';
 import Editor from './Editor.vue';
 import Preview from './Preview.vue';
 import { useSettingsStore, clampSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../stores/settings';
@@ -8,7 +8,10 @@ import { useTilesStore } from '../stores/tiles';
 import { useTabsStore } from '../stores/tabs';
 import type { Tab } from '../types';
 import { isWindowsEditorRuntime, shouldUsePlainWindowsEditor } from '../lib/platform';
+import { IS_APP_STORE_BUILD } from '../lib/app-build';
 import { previewScrollMemory, tabCaretMemory, tabTopLineMemory } from '../lib/scroll-memory';
+
+const AgentPanel = defineAsyncComponent(() => import('./AgentPanel.vue'));
 
 const props = defineProps<{
   paneId: string;
@@ -33,11 +36,20 @@ const showEditor = computed(
 );
 // `liveEdit` mode is editor-only: the inline-rendered markdown IS the
 // preview, so we don't show the separate Preview pane next to it.
+// `agent` uses the same split chrome, but the right pane is the chat.
 const showPreview = computed(
   () =>
     props.tab?.language === 'markdown' &&
     settings.viewMode !== 'edit' &&
-    settings.viewMode !== 'liveEdit'
+    settings.viewMode !== 'liveEdit' &&
+    settings.viewMode !== 'agent'
+);
+const showAgent = computed(
+  () =>
+    !IS_APP_STORE_BUILD &&
+    settings.viewMode === 'agent' &&
+    !!props.tab &&
+    (tiles.root.type === 'leaf' || tiles.focusedPaneId === props.paneId),
 );
 
 // Split view with live sync off: the preview renders what's on disk, so it
@@ -122,7 +134,9 @@ function gotoLine(line: number) {
 // Editor and preview both on screen → the divider between them is live and
 // the editor takes `splitRatio`% of the width. Pointer events, not HTML5 DnD:
 // the webview's native drag-drop handler swallows `draggable` drags.
-const isSplit = computed(() => showEditor.value && showPreview.value);
+const isSplit = computed(
+  () => showEditor.value && (showPreview.value || showAgent.value),
+);
 const contentEl = ref<HTMLElement | null>(null);
 // Live value while dragging; committed (and persisted) on pointerup so a drag
 // writes localStorage once instead of on every pointermove.
@@ -486,7 +500,7 @@ function restoreToLine(paneEl: Element, toMode: string, line: number) {
   if (props.tab?.id && line >= 1) {
     tabTopLineMemory.set(props.tab.id, line);
   }
-  if (toMode === 'edit' || toMode === 'liveEdit' || toMode === 'split') {
+  if (toMode === 'edit' || toMode === 'liveEdit' || toMode === 'split' || toMode === 'agent') {
     const cmRef = editorRef.value as any;
     if (cmRef?.scrollToLine) cmRef.scrollToLine(line);
   }
@@ -571,6 +585,12 @@ onBeforeUnmount(() => {
   window.removeEventListener('solomd:edit-table', onEditTableEvent);
   window.removeEventListener('solomd:edit-formula', onEditFormulaEvent);
 });
+
+function onAgentOpenSettings(section?: string) {
+  window.dispatchEvent(
+    new CustomEvent('solomd:open-settings', { detail: { section: section ?? 'integrations' } }),
+  );
+}
 
 defineExpose({ gotoLine, editorRef });
 
@@ -671,7 +691,7 @@ function onPreviewSearchEvent(e: Event) {
     ref="contentEl"
     class="pane-content"
     :class="{
-      'pane-content--distinct': settings.distinctSplitPanes && showEditor && showPreview,
+      'pane-content--distinct': settings.distinctSplitPanes && showEditor && (showPreview || showAgent),
     }"
   >
     <div class="pane pane--editor" v-if="showEditor && tab" :style="editorPaneStyle">
@@ -712,6 +732,12 @@ function onPreviewSearchEvent(e: Event) {
         @topline="onPreviewTopline"
       />
     </div>
+    <div class="pane pane--agent" v-if="showAgent && tab">
+      <AgentPanel
+        @open-settings="onAgentOpenSettings"
+        @close="settings.exitAgentMode()"
+      />
+    </div>
   </div>
 </template>
 
@@ -732,6 +758,17 @@ function onPreviewSearchEvent(e: Event) {
 }
 .pane--editor + .pane--preview {
   border-left: var(--bd-hair);
+}
+.pane--agent {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+}
+.pane--agent :deep(.agent-panel) {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
 }
 /* The divider is the line between the panes now; without this the preview
    host's own left border doubles it. */

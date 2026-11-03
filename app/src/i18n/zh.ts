@@ -161,6 +161,7 @@ export const zh: I18n = {
     segSource: "源码",
     segSplit: "分栏",
     segPreview: "预览",
+    segAgent: "智能体",
     viewModes: "视图模式",
     more: "更多",
     insert: "插入",

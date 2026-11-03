@@ -124,7 +124,7 @@ function baseName(p: string): string {
 }
 
 export const RECENT_LIMIT = 10;
-export const VIEW_MODES = ['edit', 'split', 'liveEdit', 'preview', 'reading'] as const;
+export const VIEW_MODES = ['edit', 'split', 'liveEdit', 'preview', 'agent', 'reading'] as const;
 
 /** Build the whole menu bar for one platform. */
 export function buildAppMenu(ctx: MenuContext): TopMenu[] {
@@ -377,14 +377,16 @@ export function buildAppMenu(ctx: MenuContext): TopMenu[] {
     split: t('toolbar.viewSplit'),
     liveEdit: t('toolbar.viewLive'),
     preview: t('toolbar.viewPreview'),
+    agent: t('header.segAgent'),
     reading: t('toolbar.viewReading'),
   };
+  const viewModes = VIEW_MODES.filter((m) => m !== 'agent' || ctx.aiAvailable);
   const view: MenuNode[] = [
     {
       type: 'submenu',
       id: 'viewMode',
       label: t('toolbar.viewMode'),
-      items: VIEW_MODES.map((m) =>
+      items: viewModes.map((m) =>
         item(`view.mode:${m}`, modeLabel[m], {
           checked: state.viewMode === m,
           // Reading and preview modes have their own toggle chords; the others

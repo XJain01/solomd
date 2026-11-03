@@ -28,7 +28,6 @@ const FormulaEditor = defineAsyncComponent(() => import('./components/FormulaEdi
 const TypesPanel = defineAsyncComponent(() => import('./components/TypesPanel.vue'));
 const HistoryPanel = defineAsyncComponent(() => import('./components/HistoryPanel.vue'));
 const PropertiesInspector = defineAsyncComponent(() => import('./components/PropertiesInspector.vue'));
-const AgentPanel = defineAsyncComponent(() => import('./components/AgentPanel.vue'));
 import RsSplitter from './components/RsSplitter.vue';
 import { useAutoCommit } from './composables/useAutoCommit';
 import { useGithubSync } from './composables/useGithubSync';
@@ -268,8 +267,7 @@ function ctxToggle(toggleFn: () => void) {
     !settings.showTasksPanel &&
     !showNeighborhoodPane.value &&
     !settings.showTypesPanel &&
-    !settings.showHistoryPanel &&
-    (IS_APP_STORE_BUILD || !settings.showAgentPanel);
+    !settings.showHistoryPanel;
   if (noPanesVisible) {
     settings.hideRightSidebarFromPane(before);
   } else if (settings.rightSidebarHidden) {
@@ -1874,10 +1872,8 @@ const showInspectorPane = computed(
     tabs.activeTab?.language === 'markdown' &&
     !!workspace.currentFolder,
 );
-// v4.0 pillar 1: Agent Panel — workspace-level visibility (not per-tab).
-// Toggled via command palette `view.toggleAgentPanel`; persists in settings.
-// App Store builds strip the AI/Agent surface entirely (Apple 3.1.1).
-const showAgentPane = computed(() => !IS_APP_STORE_BUILD && settings.showAgentPanel);
+// The agent chat is a view mode (editor | chat), not a sidebar pane.
+// `showAgentPanel` remains in saved settings so older layouts still load.
 // v4.0.2 — search is a session-only pane (PR #50). ⌘⇧F toggles searchOpen;
 // no setting persisted because users don't want search living in their
 // sidebar across launches.
@@ -2044,8 +2040,7 @@ const rightSidebarHasRenderablePane = computed(
     showNeighborhoodPane.value ||
     showTypesPane.value ||
     showHistoryPane.value ||
-    showInspectorPane.value ||
-    showAgentPane.value,
+    showInspectorPane.value,
 );
 
 const showRightSidebar = computed(() => {
@@ -2117,7 +2112,7 @@ const visibleRsPanes = computed(() => {
     types: showTypesPane.value,
     history: showHistoryPane.value,
     inspector: showInspectorPane.value,
-    agent: showAgentPane.value,
+    agent: false,
   };
   const known = ['search', 'outline', 'backlinks', 'relationships', 'tags', 'tasks', 'neighborhood', 'types', 'history', 'inspector', 'agent'] as const;
   const ordered: string[] = [];
@@ -2225,10 +2220,7 @@ function paneStyle(id: string) {
 // bumps to 440 when the agent panel is on (chat needs real estate).
 // User resizes above the auto-bump are honored.
 const sideSidebarStyle = computed(() => {
-  const w =
-    showAgentPane.value && settings.sideSidebarWidth <= 260
-      ? 440
-      : settings.sideSidebarWidth;
+  const w = settings.sideSidebarWidth;
   return { width: `${w}px`, flexBasis: `${w}px` };
 });
 
@@ -2426,11 +2418,6 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
               />
               <HistoryPanel v-if="p.id === 'history'" @close="ctxToggle(() => settings.toggleHistoryPanel())" />
               <PropertiesInspector v-if="p.id === 'inspector'" @close="ctxToggle(() => settings.toggleInspector())" />
-              <AgentPanel
-                v-if="p.id === 'agent'"
-                @open-settings="(section?: string) => openSettingsAt(section ?? 'integrations')"
-                @close="ctxToggle(() => settings.toggleAgentPanel())"
-              />
             </div>
           </template>
         </aside>
@@ -2493,11 +2480,6 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
               />
               <HistoryPanel v-if="p.id === 'history'" @close="ctxToggle(() => settings.toggleHistoryPanel())" />
               <PropertiesInspector v-if="p.id === 'inspector'" @close="ctxToggle(() => settings.toggleInspector())" />
-              <AgentPanel
-                v-if="p.id === 'agent'"
-                @open-settings="(section?: string) => openSettingsAt(section ?? 'integrations')"
-                @close="ctxToggle(() => settings.toggleAgentPanel())"
-              />
             </div>
           </template>
         </aside>
@@ -2566,9 +2548,9 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
             <span class="sidebar-ctx__check">{{ settings.showHistoryPanel ? '✓' : '' }}</span>
             {{ t('rsPane.history') }}
           </label>
-          <label v-if="!IS_APP_STORE_BUILD" class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleAgentPanel() })">
-            <span class="sidebar-ctx__check">{{ settings.showAgentPanel ? '✓' : '' }}</span>
-            {{ t('rsPane.agent') }}
+          <label v-if="!IS_APP_STORE_BUILD" class="sidebar-ctx__item" @click="closeSidebarCtx(); settings.toggleAgentPanel()">
+            <span class="sidebar-ctx__check">{{ settings.viewMode === 'agent' ? '✓' : '' }}</span>
+            {{ t('header.segAgent') }}
           </label>
         </div>
         <div v-if="sidebarCtx" class="sidebar-ctx__backdrop" @click="closeSidebarCtx" />

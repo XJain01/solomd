@@ -160,6 +160,7 @@ export const it: I18n = {
     segSource: "Sorgente",
     segSplit: "Diviso",
     segPreview: "Anteprima",
+    segAgent: "Agente",
     viewModes: "Modalità vista",
     more: "Altro",
     insert: "Inserisci",

@@ -160,6 +160,7 @@ export const ko: I18n = {
     segSource: "소스",
     segSplit: "분할",
     segPreview: "미리보기",
+    segAgent: "에이전트",
     viewModes: "보기 모드",
     more: "더 보기",
     insert: "삽입",

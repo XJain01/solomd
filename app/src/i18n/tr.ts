@@ -160,6 +160,7 @@ export const tr: I18n = {
     segSource: "Kaynak",
     segSplit: "Bölünmüş",
     segPreview: "Önizleme",
+    segAgent: "Ajan",
     viewModes: "Görünüm modu",
     more: "Daha fazla",
     insert: "Ekle",

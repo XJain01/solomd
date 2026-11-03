@@ -160,6 +160,7 @@ export const ja: I18n = {
     segSource: "ソース",
     segSplit: "分割",
     segPreview: "プレビュー",
+    segAgent: "エージェント",
     viewModes: "表示モード",
     more: "その他",
     insert: "挿入",

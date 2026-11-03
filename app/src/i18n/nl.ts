@@ -160,6 +160,7 @@ export const nl: I18n = {
     segSource: "Bron",
     segSplit: "Gesplitst",
     segPreview: "Voorbeeld",
+    segAgent: "Agent",
     viewModes: "Weergavemodus",
     more: "Meer",
     insert: "Invoegen",

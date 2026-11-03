@@ -162,6 +162,7 @@ export const pt: I18n = {
     segSource: "Fonte",
     segSplit: "Dividido",
     segPreview: "Prévia",
+    segAgent: "Agente",
     viewModes: "Modo de visualização",
     more: "Mais",
     insert: "Inserir",

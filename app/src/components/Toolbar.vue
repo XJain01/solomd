@@ -293,17 +293,21 @@ function goMorePage(p: MorePage) {
  *  control is just "clean AI artifacts" (see the template). */
 const aiRewriteAvailable = computed(() => !IS_APP_STORE_BUILD && settings.aiEnabled);
 
-type ViewModeId = 'edit' | 'split' | 'liveEdit' | 'preview' | 'reading';
-/** The header's segmented switch: the four modes people move between while
- *  writing (split = source left, preview right). Reading stays in the View
- *  menu and the palette. */
-const segModes: Array<{ mode: ViewModeId; label: string }> = [
-  { mode: 'liveEdit', label: 'header.segLive' },
-  { mode: 'edit', label: 'header.segSource' },
-  { mode: 'split', label: 'header.segSplit' },
-  { mode: 'preview', label: 'header.segPreview' },
-];
-const segIndex = computed(() => segModes.findIndex((m) => m.mode === settings.viewMode));
+type ViewModeId = 'edit' | 'split' | 'liveEdit' | 'preview' | 'reading' | 'agent';
+/** The header's segmented switch. Split is source left, preview right;
+ *  agent is the same split with the chat on the right. Reading stays in
+ *  the View menu and the palette. App Store builds omit the agent segment. */
+const segModes = computed<Array<{ mode: ViewModeId; label: string }>>(() => {
+  const modes: Array<{ mode: ViewModeId; label: string }> = [
+    { mode: 'liveEdit', label: 'header.segLive' },
+    { mode: 'edit', label: 'header.segSource' },
+    { mode: 'split', label: 'header.segSplit' },
+    { mode: 'preview', label: 'header.segPreview' },
+  ];
+  if (!IS_APP_STORE_BUILD) modes.push({ mode: 'agent', label: 'header.segAgent' });
+  return modes;
+});
+const segIndex = computed(() => segModes.value.findIndex((m) => m.mode === settings.viewMode));
 function pickViewMode(mode: ViewModeId) {
   closeAllDropdowns();
   settings.setViewMode(mode);
@@ -908,7 +912,7 @@ onBeforeUnmount(() => {
       :class="{ 'seg--none': segIndex < 0 }"
       role="radiogroup"
       :aria-label="t('header.viewModes')"
-      :style="{ '--seg-i': Math.max(0, segIndex) }"
+      :style="{ '--seg-i': Math.max(0, segIndex), '--seg-n': segModes.length }"
     >
       <span class="seg__thumb" aria-hidden="true" />
       <button
@@ -1479,11 +1483,11 @@ onBeforeUnmount(() => {
   color: var(--text);
 }
 
-/* ── Segmented 实时 / 源码 / 预览 — the thumb slides ─────────────────── */
+/* ── Segmented 实时 / 源码 / 分栏 / 预览 / 智能体 — the thumb slides ── */
 .seg {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(4, minmax(44px, 1fr));
+  grid-template-columns: repeat(var(--seg-n, 4), minmax(44px, 1fr));
   grid-auto-columns: 1fr;
   padding: 3px;
   gap: 0;
@@ -1497,7 +1501,7 @@ onBeforeUnmount(() => {
   top: 3px;
   bottom: 3px;
   left: 3px;
-  width: calc((100% - 6px) / 4);
+  width: calc((100% - 6px) / var(--seg-n, 4));
   border-radius: var(--r-sm);
   background: var(--bg);
   box-shadow: var(--sh-thumb);
@@ -1538,7 +1542,7 @@ onBeforeUnmount(() => {
   outline: none;
   box-shadow: var(--ring);
 }
-/* The switch needs ~180px; below ~640px it moves into "More". */
+/* The switch needs room for every segment; below ~640px it moves into "More". */
 .toolbar--narrow .seg {
   display: none;
 }

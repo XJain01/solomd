@@ -160,6 +160,7 @@ export const sv: I18n = {
     segSource: "Källa",
     segSplit: "Delad",
     segPreview: "Förhandsvisning",
+    segAgent: "Agent",
     viewModes: "Visningsläge",
     more: "Mer",
     insert: "Infoga",

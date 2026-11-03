@@ -160,6 +160,7 @@ export const en = {
     segSource: "Source",
     segSplit: "Split",
     segPreview: "Preview",
+    segAgent: "Agent",
     viewModes: "View mode",
     more: "More",
     insert: "Insert",

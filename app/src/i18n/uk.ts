@@ -160,6 +160,7 @@ export const uk: I18n = {
     segSource: "Код",
     segSplit: "Поділ",
     segPreview: "Перегляд",
+    segAgent: "Агент",
     viewModes: "Режим перегляду",
     more: "Більше",
     insert: "Вставити",
