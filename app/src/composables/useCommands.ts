@@ -799,6 +799,18 @@ export function useCommands(): Command[] {
     },
 
     {
+      id: 'insert.callout',
+      title: 'Insert callout',
+      hint: 'Insert an Obsidian callout (> [!note]). A selection becomes the body.',
+      run: () => {
+        window.dispatchEvent(
+          new CustomEvent('solomd:insert-markdown', {
+            detail: { snippet: '\n> [!note]\n> $|$\n', paneId: tiles.focusedPaneId },
+          }),
+        );
+      },
+    },
+    {
       id: 'help.welcomeTour',
       title: 'Open Welcome Tour',
       hint: 'Open 4 in-memory tutorial tabs (Welcome, Syntax, Slideshow, Shortcuts)',

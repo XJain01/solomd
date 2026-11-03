@@ -121,6 +121,14 @@ export const SLASH_BLOCKS: SlashBlock[] = [
     keywords: ['quote', 'blockquote', 'callout'],
   },
   {
+    id: 'callout',
+    icon: 'ℹ',
+    label: 'Callout',
+    hint: '> [!note]',
+    snippet: '> [!note]\n> ${cursor}',
+    keywords: ['callout', 'note', 'admonition', '标注', '提示'],
+  },
+  {
     id: 'divider',
     icon: '—',
     label: 'Divider',

@@ -1295,6 +1295,10 @@ onBeforeUnmount(() => {
                 <span class="dropdown__name">{{ t('toolbar.insertQuote') }}</span>
                 <span v-if="chord('fmt.quote')" class="dropdown__shortcut">{{ chord('fmt.quote') }}</span>
               </button>
+              <button class="dropdown__item dropdown__item--single" role="menuitem" tabindex="-1" @mousedown.prevent="dispatchInsert('\n> [!note]\n> $|$\n')">
+                <span class="dropdown__check"></span>
+                <span class="dropdown__name">{{ t('toolbar.insertCallout') }}</span>
+              </button>
               <button class="dropdown__item dropdown__item--single" role="menuitem" tabindex="-1" @mousedown.prevent="dispatchInsert('\n---\n')">
                 <span class="dropdown__check"></span>
                 <span class="dropdown__name">{{ t('toolbar.insertDivider') }}</span>

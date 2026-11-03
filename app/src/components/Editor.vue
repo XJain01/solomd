@@ -6130,14 +6130,19 @@ function insertMarkdown(snippet: string): void {
   if (!view) return;
   const parsed = parseInsertSnippet(snippet);
   const sel = view.state.selection.main;
-  // Add a leading newline if not already at the start of a line, for block-level snippets.
-  const needsLeadingBreak = snippet.startsWith('\n') && sel.from > 0 &&
+  const selected = sel.from === sel.to ? '' : view.state.doc.sliceString(sel.from, sel.to);
+  const calloutBody = snippet.includes('[!note]') && selected.trim() && !selected.includes('[!')
+    ? `\n> [!note]\n${selected.replace(/\n+$/, '').split('\n').map((line) => `> ${line}`).join('\n')}\n`
+    : null;
+  const needsLeadingBreak = !calloutBody && snippet.startsWith('\n') && sel.from > 0 &&
     view.state.doc.sliceString(sel.from - 1, sel.from) !== '\n';
-  const insertText = needsLeadingBreak ? '\n' + parsed.text : parsed.text;
-  const base = sel.from + (needsLeadingBreak ? 1 : 0);
+  const insertText = calloutBody ?? (needsLeadingBreak ? '\n' + parsed.text : parsed.text);
+  const base = sel.from + (!calloutBody && needsLeadingBreak ? 1 : 0);
+  const anchor = calloutBody ? insertText.length : parsed.anchor;
+  const head = calloutBody ? insertText.length : parsed.head;
   view.dispatch({
     changes: { from: sel.from, to: sel.to, insert: insertText },
-    selection: { anchor: base + parsed.anchor, head: base + parsed.head },
+    selection: { anchor: base + anchor, head: base + head },
   });
   view.focus();
 }

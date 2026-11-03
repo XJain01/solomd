@@ -130,7 +130,7 @@ test('C1 section 四 / 六 / Part-1 commands all have a menu entry', () => {
     // Paragraph
     'fmt.h1', 'fmt.h2', 'fmt.h3', 'fmt.h4', 'fmt.h5', 'fmt.h6', 'heading.promote', 'heading.demote',
     'heading.paragraph', 'fmt.ul', 'fmt.ol', 'fmt.task', 'fmt.quote', 'fmt.codeblock',
-    'editor.tableEditor', 'editor.formulaEditor', 'insert.mathBlock', 'insert.mermaid', 'insert.table', 'insert.hr',
+    'editor.tableEditor', 'editor.formulaEditor', 'insert.mathBlock', 'insert.mermaid', 'insert.table', 'insert.hr', 'insert.callout',
     // Format
     'fmt.bold', 'fmt.italic', 'fmt.strike', 'fmt.code', 'insert.mathInline', 'fmt.link',
     'editor.insertImage', 'editor.insertImageUrl',
@@ -158,7 +158,7 @@ test('every menu id is something App.vue can dispatch', () => {
     'view.zoomPreviewIn', 'view.zoomPreviewOut', 'view.zoomPreviewReset', 'help.shortcuts', 'help.cli',
     'help.checkUpdate', 'help.about', 'edit.find', 'edit.replace', 'edit.undo', 'edit.redo', 'edit.cut', 'edit.copy',
     'edit.paste', 'edit.selectAll', 'insert.mathBlock', 'insert.mathInline', 'insert.table',
-    'insert.mermaid', 'insert.hr',
+    'insert.mermaid', 'insert.hr', 'insert.callout',
     // palette commands
     'export.html', 'export.docx', 'export.pdf', 'export.image', 'clean.aiArtifacts',
     'view.toggleSpellCheck', 'view.toggleLivePreview', 'view.toggleFitWidth', 'pomodoro.open',

@@ -45,6 +45,7 @@ import {
   rewriteImageUrls,
 } from './image-resolve';
 import { renderMarkdown, extractImageRoot } from './markdown';
+import { calloutEndLine } from './callouts';
 import { findHtmlBlockEnd } from './html-live-render';
 import { openRenderedLink } from './link-open';
 import {
@@ -525,6 +526,33 @@ class HtmlBlockWidget extends WidgetType {
     if (event.type === 'contextmenu') return true;
     if (event instanceof MouseEvent && event.button === 2) return true;
     return false;
+  }
+}
+
+/** Obsidian callout, rendered with the same pipeline as the preview. */
+class CalloutWidget extends WidgetType {
+  private readonly source: string;
+
+  constructor(source: string) {
+    super();
+    this.source = source;
+  }
+
+  eq(other: CalloutWidget): boolean {
+    return other.source === this.source;
+  }
+
+  toDOM(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'cm-live-block cm-live-block--callout';
+    wrap.innerHTML = renderMarkdown(this.source);
+    return wrap;
+  }
+
+  ignoreEvent(event: Event): boolean {
+    const node = event.target instanceof Node ? event.target : null;
+    const el = node instanceof Element ? node : node?.parentElement;
+    return !!el?.closest('summary, .md-callout__title');
   }
 }
 
@@ -1139,6 +1167,29 @@ function buildBlockDecorations(state: EditorState, opts: BlockOptions): Decorati
           // live-renderable markdown — skip every scan below.
           if (fenceBody[i - 1]) {
             i += 1;
+            continue;
+          }
+
+          const calloutEnd = calloutEndLine(sourceLines, i - 1);
+          if (calloutEnd !== null) {
+            const endI = calloutEnd + 1;
+            const cursorInside =
+              keepSource ||
+              (cursorLine >= i && cursorLine <= endI) ||
+              (cursorLineEnd >= i && cursorLineEnd <= endI);
+            if (!cursorInside) {
+              const blockFrom = line.from;
+              const blockTo = doc.line(endI).to;
+              builder.add(
+                blockFrom,
+                blockTo,
+                Decoration.replace({
+                  widget: new CalloutWidget(doc.sliceString(blockFrom, blockTo)),
+                  block: true,
+                }),
+              );
+            }
+            i = endI + 1;
             continue;
           }
 

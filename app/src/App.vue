@@ -972,6 +972,7 @@ const INSERT_SNIPPETS: Record<string, string> = {
   'insert.table': '\n| $|$ | Header |\n| --- | --- |\n| cell | cell |\n',
   'insert.mermaid': MERMAID_INSERT_SNIPPET,
   'insert.hr': '\n---\n',
+  'insert.callout': '\n> [!note]\n> $|$\n',
 };
 
 /**

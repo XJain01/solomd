@@ -642,32 +642,51 @@ button:disabled {
   font-family: var(--font-mono);
 }
 
-/* GitHub-style callouts (> [!NOTE] …) — global so preview, live-edit blocks
-   and the print overlay all pick them up. Label text comes from ::before so
-   it never pollutes copy/paste of the body. */
+/* Obsidian callouts (`> [!note]`). Color is per type; unknown types use note. */
 .md-callout {
-  border-left: 3px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-hover);
-  padding: 10px 14px;
-  margin: 0.8em 0;
+  --callout: #4c8bf5;
+  border: 1px solid color-mix(in srgb, var(--callout) 35%, transparent);
+  border-left: 4px solid var(--callout);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--callout) 12%, var(--bg));
+  padding: 2px 0 4px;
+  margin: 0.9em 0;
 }
-.md-callout::before {
-  display: block;
-  font-weight: 600;
-  font-size: 0.9em;
-  margin-bottom: 4px;
+.md-callout__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 6px;
+  font-weight: 650;
+  color: var(--callout);
+  cursor: default;
+  list-style: none;
 }
-.md-callout--note { border-left-color: #316dca; }
-.md-callout--note::before { content: 'ℹ️ Note'; color: #316dca; }
-.md-callout--tip { border-left-color: #347d39; }
-.md-callout--tip::before { content: '💡 Tip'; color: #347d39; }
-.md-callout--important { border-left-color: #8256d0; }
-.md-callout--important::before { content: '❗ Important'; color: #8256d0; }
-.md-callout--warning { border-left-color: #a8750a; }
-.md-callout--warning::before { content: '⚠️ Warning'; color: #a8750a; }
-.md-callout--caution { border-left-color: #c93c37; }
-.md-callout--caution::before { content: '🛑 Caution'; color: #c93c37; }
+.md-callout__title::-webkit-details-marker { display: none; }
+details.md-callout > .md-callout__title { cursor: pointer; }
+.md-callout__icon { font-size: 1.05em; line-height: 1; }
+.md-callout__label { flex: 1 1 auto; min-width: 0; }
+.md-callout__fold::before { content: '▸'; font-size: 0.85em; }
+details[open] > .md-callout__title .md-callout__fold::before { content: '▾'; }
+.md-callout > :not(.md-callout__title) {
+  margin-left: 12px;
+  margin-right: 12px;
+}
+.md-callout > :last-child { margin-bottom: 8px; }
+.md-callout--note { --callout: #4c8bf5; }
+.md-callout--abstract { --callout: #00b3a4; }
+.md-callout--info { --callout: #4c8bf5; }
+.md-callout--todo { --callout: #4c8bf5; }
+.md-callout--tip { --callout: #00a3c4; }
+.md-callout--important { --callout: #8b6ad6; }
+.md-callout--success { --callout: #2ea043; }
+.md-callout--question { --callout: #c69000; }
+.md-callout--warning { --callout: #d4890b; }
+.md-callout--failure,
+.md-callout--danger,
+.md-callout--bug { --callout: #e5534b; }
+.md-callout--example { --callout: #a371f7; }
+.md-callout--quote { --callout: #8b949e; }
 
 .contains-task-list {
   list-style: none;

@@ -336,6 +336,7 @@ export function buildAppMenu(ctx: MenuContext): TopMenu[] {
     item('insert.mathBlock', t('menubar.insertMathBlock')),
     item('insert.mermaid', t('menubar.insertMermaid')),
     item('insert.hr', t('menubar.insertDivider')),
+    item('insert.callout', t('menubar.insertCallout')),
   ];
 
   // ---- 格式 Format ----
