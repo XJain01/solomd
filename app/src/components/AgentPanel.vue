@@ -127,7 +127,9 @@ const stateKey = computed<StateKey>(() => {
   return 'ready';
 });
 
-const canSend = computed(() => draft.value.trim().length > 0 && !agent.isStreaming);
+const canSend = computed(
+  () => stateKey.value === 'ready' && draft.value.trim().length > 0 && !agent.isStreaming,
+);
 
 function onOpenAiSettings() {
   emit('open-settings', 'integrations');
@@ -182,7 +184,7 @@ function autoscroll() {
 
 async function send() {
   const prompt = draft.value.trim();
-  if (!prompt || agent.isStreaming) return;
+  if (stateKey.value !== 'ready' || !prompt || agent.isStreaming) return;
   errorMsg.value = null;
 
   // Push user message + empty assistant placeholder. Chunks stream into the
@@ -613,41 +615,42 @@ watch(stateKey, (k) => {
       </div>
 
       <div v-if="errorMsg" class="agent-panel__error">{{ errorMsg }}</div>
-
-      <footer class="agent-panel__compose">
-        <textarea
-          ref="inputRef"
-          v-model="draft"
-          class="rp-textarea agent-panel__input"
-          :placeholder="t('agent.placeholder')"
-          rows="2"
-          @keydown="onKeydown"
-        ></textarea>
-        <div class="agent-panel__compose-foot">
-          <span class="agent-panel__compose-hint">
-            <template v-if="agent.isStreaming">{{ t('agent.streaming') }}</template>
-            <template v-else>{{ t('agent.enterToSend') }}</template>
-          </span>
-          <button
-            v-if="agent.isStreaming"
-            class="rp-btn agent-panel__send agent-panel__send--stop"
-            type="button"
-            @click="stop"
-          >
-            {{ t('agent.stop') }}
-          </button>
-          <button
-            v-else
-            class="rp-btn rp-btn--primary agent-panel__send"
-            type="button"
-            :disabled="!canSend"
-            @click="send"
-          >
-            {{ t('agent.send') }}
-          </button>
-        </div>
-      </footer>
     </template>
+
+    <footer class="agent-panel__compose">
+      <textarea
+        ref="inputRef"
+        v-model="draft"
+        class="rp-textarea agent-panel__input"
+        :placeholder="t('agent.placeholder')"
+        rows="2"
+        :disabled="stateKey !== 'ready'"
+        @keydown="onKeydown"
+      ></textarea>
+      <div class="agent-panel__compose-foot">
+        <span class="agent-panel__compose-hint">
+          <template v-if="agent.isStreaming">{{ t('agent.streaming') }}</template>
+          <template v-else>{{ t('agent.enterToSend') }}</template>
+        </span>
+        <button
+          v-if="agent.isStreaming"
+          class="rp-btn agent-panel__send agent-panel__send--stop"
+          type="button"
+          @click="stop"
+        >
+          {{ t('agent.stop') }}
+        </button>
+        <button
+          v-else
+          class="rp-btn rp-btn--primary agent-panel__send"
+          type="button"
+          :disabled="!canSend"
+          @click="send"
+        >
+          {{ t('agent.send') }}
+        </button>
+      </div>
+    </footer>
   </div>
 </template>
 
