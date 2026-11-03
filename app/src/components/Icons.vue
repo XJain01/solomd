@@ -247,11 +247,6 @@ defineProps<{ name: string; size?: number }>();
     <template v-else-if="name === 'italic'">
       <path d="M14 5h-4M14 19h-4M14 5l-4 14" />
     </template>
-    <template v-else-if="name === 'annotate'">
-      <path d="M5 19l2.5-1 9-9a1.8 1.8 0 0 0-2.5-2.5l-9 9L5 19z" />
-      <path d="M14 6.5l2.5 2.5" />
-      <path d="M8 20h11" />
-    </template>
     <template v-else-if="name === 'highlight'">
       <path d="m9 11-6 6v3h9l3-3" />
       <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" />

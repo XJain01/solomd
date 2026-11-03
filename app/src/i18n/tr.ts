@@ -1406,7 +1406,6 @@ export const tr: I18n = {
     neighborhood: "Komşuluk",
     history: 'Geçmiş',
     agent: 'Aracı',
-    annotations: "Annotations",
   },
   inbox: {
     heading: 'Gelen Kutusu',
@@ -2158,7 +2157,6 @@ export const tr: I18n = {
       underline: "Altı çizili",
       strike: "Üstü çizili",
       highlight: "Vurgula",
-      annotate: "Annotate",
       code: "Satır içi kod",
       link: "Bağlantı",
       h1: "Başlık 1",
@@ -2386,7 +2384,6 @@ export const tr: I18n = {
     today: "Bugün",
     inbox: "Gelen kutusu",
     kanban: "Kanban",
-    annotations: "Annotations",
     inboxFilterOn: "Ağaçta yalnızca gelen kutusu notlarını göster",
     inboxFilterOff: "Ağaçta tüm dosyaları göster",
     inboxFilterActive: "Yalnızca gelen kutusu notları",
@@ -2419,13 +2416,6 @@ export const tr: I18n = {
     dropHere: "Drop here",
     hint: "Drag a card between columns. That writes status into the note.",
     moveFailed: "Couldn't update status: {error}",
-  },
-
-  annotations: {
-    heading: "Annotations",
-    empty: "This note has no highlights yet.",
-    noNote: "Open a Markdown note to list its highlights.",
-    syntax: "Select text and choose Annotate. Notes are ==text==^{note}.",
   },
 
 };

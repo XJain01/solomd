@@ -1398,7 +1398,6 @@ export const ru: I18n = {
     neighborhood: 'Окружение',
     history: 'История',
     agent: 'Агент',
-    annotations: "Annotations",
   },
   inbox: {
     heading: 'Входящие',
@@ -2132,7 +2131,6 @@ export const ru: I18n = {
       underline: "Подчёркнутый",
       strike: 'Зачёркнутый',
       highlight: "Выделение",
-      annotate: "Annotate",
       code: 'Встроенный код',
       link: 'Ссылка',
       h1: 'Заголовок 1',
@@ -2360,7 +2358,6 @@ export const ru: I18n = {
     today: "Сегодня",
     inbox: "Входящие",
     kanban: "Канбан",
-    annotations: "Annotations",
     inboxFilterOn: "Показывать в дереве только входящие заметки",
     inboxFilterOff: "Показывать в дереве все файлы",
     inboxFilterActive: "Только входящие заметки",
@@ -2393,13 +2390,6 @@ export const ru: I18n = {
     dropHere: "Drop here",
     hint: "Drag a card between columns. That writes status into the note.",
     moveFailed: "Couldn't update status: {error}",
-  },
-
-  annotations: {
-    heading: "Annotations",
-    empty: "This note has no highlights yet.",
-    noNote: "Open a Markdown note to list its highlights.",
-    syntax: "Select text and choose Annotate. Notes are ==text==^{note}.",
   },
 
 };

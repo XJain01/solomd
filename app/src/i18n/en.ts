@@ -1413,7 +1413,6 @@ export const en = {
     neighborhood: 'Neighborhood',
     history: 'History',
     agent: 'Agent',
-    annotations: 'Annotations',
   },
   inbox: {
     heading: 'Inbox',
@@ -2170,7 +2169,6 @@ export const en = {
       underline: "Underline",
       strike: "Strikethrough",
       highlight: "Highlight",
-      annotate: "Annotate",
       code: "Inline Code",
       link: "Link",
       h1: "Heading 1",
@@ -2398,7 +2396,6 @@ export const en = {
     today: "Today",
     inbox: "Inbox",
     kanban: "Kanban",
-    annotations: "Annotations",
     inboxFilterOn: "Show only inbox notes in the tree",
     inboxFilterOff: "Show all files in the tree",
     inboxFilterActive: "Showing inbox notes only",
@@ -2431,12 +2428,6 @@ export const en = {
     dropHere: "Drop here",
     hint: "Drag a card between columns. That writes status into the note.",
     moveFailed: "Couldn't update status: {error}",
-  },
-  annotations: {
-    heading: "Annotations",
-    empty: "This note has no highlights yet.",
-    noNote: "Open a Markdown note to list its highlights.",
-    syntax: "Select text and choose Annotate. Notes are ==text==^{note}.",
   },
 };
 

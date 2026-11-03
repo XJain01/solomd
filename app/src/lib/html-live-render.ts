@@ -76,36 +76,6 @@ export interface LiveMarkSpan {
 // edit hides the markers and styles the span the same way (#199).
 const MARK_SPAN_RE = /==([^\s=](?:[^=\n]*?[^\s=])?)==(?!=)/g;
 
-/** A `^{comment}` glued to the end of a highlight. Offsets are into `line`. */
-export interface LiveAnnotationNote {
-  openFrom: number;
-  openTo: number;
-  contentFrom: number;
-  contentTo: number;
-  closeFrom: number;
-  closeTo: number;
-  comment: string;
-}
-
-const NOTE_RE = /^\^\{([^{}\n]*)\}/;
-
-/** The note that starts at `index` in `line`, if the highlight has one. */
-export function annotationNoteAt(line: string, index: number): LiveAnnotationNote | null {
-  const m = NOTE_RE.exec(line.slice(index));
-  if (!m) return null;
-  const openFrom = index;
-  const contentFrom = index + 2;
-  return {
-    openFrom,
-    openTo: contentFrom,
-    contentFrom,
-    contentTo: contentFrom + m[1].length,
-    closeFrom: contentFrom + m[1].length,
-    closeTo: index + m[0].length,
-    comment: m[1],
-  };
-}
-
 /** Find `==highlight==` spans that begin and end on one line. */
 export function findMarkSpans(line: string): LiveMarkSpan[] {
   const spans: LiveMarkSpan[] = [];

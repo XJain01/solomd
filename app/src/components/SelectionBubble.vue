@@ -387,13 +387,6 @@ defineExpose({ hide });
       ><Icon name="highlight" :size="16" /></button>
       <button
         class="sel-bubble__btn"
-        :title="t('cmd.fmt.annotate')"
-        :aria-label="t('cmd.fmt.annotate')"
-        data-kind="annotate"
-        @click="run('annotate')"
-      ><Icon name="annotate" :size="16" /></button>
-      <button
-        class="sel-bubble__btn"
         :class="{ 'is-on': active('code') }"
         :title="tip('cmd.fmt.code', 'fmt.code')"
         :aria-label="t('cmd.fmt.code')"

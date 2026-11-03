@@ -332,15 +332,6 @@ onBeforeUnmount(() => {
         </button>
         <button
           class="sb__row"
-          :class="{ 'sb__row--active': settings.showAnnotations }"
-          type="button"
-          @click="settings.toggleAnnotations()"
-        >
-          <Icon name="highlight" :size="16" class="sb__row-icon" />
-          <span class="sb__row-label">{{ t('sidebar.annotations') }}</span>
-        </button>
-        <button
-          class="sb__row"
           :class="{ 'sb__row--open': recentOpen }"
           type="button"
           aria-haspopup="menu"

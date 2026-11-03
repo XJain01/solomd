@@ -11,7 +11,6 @@
  * the format comes off. That is what makes one shortcut enough.
  */
 
-import { applyAnnotation } from './annotations';
 import { enclosingListContentIndent } from './list-continuation';
 import { applyChanges, mapPos, renumberChanges } from './list-renumber';
 
@@ -21,7 +20,6 @@ export type FormatKind =
   | 'underline'
   | 'strike'
   | 'highlight'
-  | 'annotate'
   | 'code'
   | 'link'
   | 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
@@ -32,7 +30,7 @@ export type FormatKind =
   | 'codeblock';
 
 export const FORMAT_KINDS: FormatKind[] = [
-  'bold', 'italic', 'underline', 'strike', 'highlight', 'annotate', 'code', 'link',
+  'bold', 'italic', 'underline', 'strike', 'highlight', 'code', 'link',
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'quote', 'ul', 'ol', 'task', 'codeblock',
 ];
@@ -783,7 +781,6 @@ export function applyFormat(doc: string, from: number, to: number, kind: FormatK
     case 'underline': return toggleTagWrap(doc, a, b, '<u>', '</u>');
     case 'strike': return toggleWrap(doc, a, b, '~~');
     case 'highlight': return toggleWrap(doc, a, b, '==');
-    case 'annotate': return applyAnnotation(doc, a, b) ?? { from: a, to: b, insert: doc.slice(a, b), selFrom: a, selTo: b };
     case 'code': return toggleWrap(doc, a, b, '`');
     case 'link': return makeLink(doc, a, b);
     case 'quote':

@@ -1403,7 +1403,6 @@ export const ja: I18n = {
     neighborhood: "関連ノート",
     history: '履歴',
     agent: 'エージェント',
-    annotations: "Annotations",
   },
   inbox: {
     heading: "受信トレイ",
@@ -2141,7 +2140,6 @@ export const ja: I18n = {
       underline: "下線",
       strike: "取り消し線",
       highlight: "ハイライト",
-      annotate: "Annotate",
       code: "インラインコード",
       link: "リンク",
       h1: "見出し 1",
@@ -2369,7 +2367,6 @@ export const ja: I18n = {
     today: "今日",
     inbox: "受信箱",
     kanban: "カンバン",
-    annotations: "Annotations",
     inboxFilterOn: "ツリーに受信箱のノートだけを表示",
     inboxFilterOff: "ツリーにすべてのファイルを表示",
     inboxFilterActive: "受信箱のノートのみ表示中",
@@ -2402,13 +2399,6 @@ export const ja: I18n = {
     dropHere: "Drop here",
     hint: "Drag a card between columns. That writes status into the note.",
     moveFailed: "Couldn't update status: {error}",
-  },
-
-  annotations: {
-    heading: "Annotations",
-    empty: "This note has no highlights yet.",
-    noNote: "Open a Markdown note to list its highlights.",
-    syntax: "Select text and choose Annotate. Notes are ==text==^{note}.",
   },
 
 };

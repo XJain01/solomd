@@ -1406,7 +1406,6 @@ export const nl: I18n = {
     neighborhood: "Omgeving",
     history: 'Geschiedenis',
     agent: 'Agent',
-    annotations: "Annotations",
   },
   inbox: {
     heading: 'Inbox',
@@ -2158,7 +2157,6 @@ export const nl: I18n = {
       underline: "Onderstrepen",
       strike: "Doorhalen",
       highlight: "Markeren",
-      annotate: "Annotate",
       code: "Inline code",
       link: "Link",
       h1: "Kop 1",
@@ -2386,7 +2384,6 @@ export const nl: I18n = {
     today: "Vandaag",
     inbox: "Inbox",
     kanban: "Kanban",
-    annotations: "Annotations",
     inboxFilterOn: "Toon alleen inboxnotities in de boom",
     inboxFilterOff: "Toon alle bestanden in de boom",
     inboxFilterActive: "Alleen inboxnotities",
@@ -2419,13 +2416,6 @@ export const nl: I18n = {
     dropHere: "Drop here",
     hint: "Drag a card between columns. That writes status into the note.",
     moveFailed: "Couldn't update status: {error}",
-  },
-
-  annotations: {
-    heading: "Annotations",
-    empty: "This note has no highlights yet.",
-    noNote: "Open a Markdown note to list its highlights.",
-    syntax: "Select text and choose Annotate. Notes are ==text==^{note}.",
   },
 
 };

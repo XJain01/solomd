@@ -1406,7 +1406,6 @@ export const uk: I18n = {
     neighborhood: "Сусідство",
     history: 'Історія',
     agent: 'Агент',
-    annotations: "Annotations",
   },
   inbox: {
     heading: 'Вхідні',
@@ -2158,7 +2157,6 @@ export const uk: I18n = {
       underline: "Підкреслений",
       strike: "Закреслений",
       highlight: "Виділення",
-      annotate: "Annotate",
       code: "Вбудований код",
       link: "Посилання",
       h1: "Заголовок 1",
@@ -2386,7 +2384,6 @@ export const uk: I18n = {
     today: "Сьогодні",
     inbox: "Вхідні",
     kanban: "Канбан",
-    annotations: "Annotations",
     inboxFilterOn: "Показувати в дереві лише вхідні нотатки",
     inboxFilterOff: "Показувати в дереві всі файли",
     inboxFilterActive: "Лише вхідні нотатки",
@@ -2419,13 +2416,6 @@ export const uk: I18n = {
     dropHere: "Drop here",
     hint: "Drag a card between columns. That writes status into the note.",
     moveFailed: "Couldn't update status: {error}",
-  },
-
-  annotations: {
-    heading: "Annotations",
-    empty: "This note has no highlights yet.",
-    noNote: "Open a Markdown note to list its highlights.",
-    syntax: "Select text and choose Annotate. Notes are ==text==^{note}.",
   },
 
 };
