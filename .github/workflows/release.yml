@@ -122,18 +122,25 @@ jobs:
           releaseBody: |
             ## SoloMD ${{ github.ref_name }}
 
-            > ⭐ **Like SoloMD? [Star it on GitHub](https://github.com/zhitongblog/solomd)** — it's free, made by one developer, and stars are how other people find it.
-            > 觉得好用？请[去 GitHub 点个 Star](https://github.com/zhitongblog/solomd) —— 免费开源、一个人维护，Star 能让更多人发现它。
+            > ⭐ **Like SoloMD? [Star it on GitHub](https://github.com/XJain01/solomd)** — it's free, and stars are how other people find it.
+            > 觉得好用？请[去 GitHub 点个 Star](https://github.com/XJain01/solomd) —— Star 能让更多人发现它。
             >
             > 📣 Wrote about SoloMD or recommended it? [Get listed as a promoter](https://solomd.app/promote) · 写过、推荐过 SoloMD？[登记成为推广者](https://solomd.app/zh/promote)
 
             ### What's new / 更新内容
 
+            Fork release, distinct from upstream 5.0.12:
+
+            - **Agent view** in the header, with the chat in a split pane beside the note
+            - **Kanban** under Inbox — columns come from note status frontmatter, and dragging a card writes that status back
+            - **tldraw** whiteboard interaction no longer jumps the page or loses scroll
+            - **Obsidian Callouts** — `> [!note]` (and the other built-in types), including a custom title and foldable `[!note]+` / `[!note]-`
+
             https://solomd.app/whats-new · [中文](https://solomd.app/zh/whats-new)
 
             ### Install / 安装
 
-            - **macOS**: download `.dmg`, drag SoloMD to `/Applications`
+            - **macOS**: not built in CI (same as upstream). Sign and notarize locally with `./scripts/build-mac.sh`, then upload the `.dmg` to this draft. Once attached, drag SoloMD to `/Applications`
             - **Windows**: download `.msi`. On first launch you may see "Windows protected your PC" → click **More info** → **Run anyway** (one-time, until SmartScreen reputation builds). 首次运行点 "更多信息" → "仍要运行" 即可
             - **Linux**: download `.AppImage` (`chmod +x` and run) or `.deb` / `.rpm`
 

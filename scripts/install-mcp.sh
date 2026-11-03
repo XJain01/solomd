@@ -5,18 +5,18 @@
 # isn't writable).
 #
 # Run via:
-#   curl -fsSL https://raw.githubusercontent.com/zhitongblog/solomd/main/scripts/install-mcp.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/XJain01/solomd/main/scripts/install-mcp.sh | bash
 #
 # Override the version with: VERSION=v2.2.0 curl ... | bash
 #
 # Mirrors the layout of `scripts/install-cli.sh`. Binaries are released as
 # tarballs alongside the desktop app under
 #   solomd-mcp-<platform>-<arch>.tar.gz
-# at https://github.com/zhitongblog/solomd/releases.
+# at https://github.com/XJain01/solomd/releases.
 
 set -e
 
-REPO="zhitongblog/solomd"
+REPO="XJain01/solomd"
 VERSION="${VERSION:-latest}"
 
 # ---------------------------------------------------------------------------
