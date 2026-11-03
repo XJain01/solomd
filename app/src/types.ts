@@ -7,7 +7,10 @@ export type Language = 'markdown' | 'plaintext';
 // no toolbar, no file tree, no status bar — just the centered prose, like
 // a book page. Toggled via Cmd+Shift+R / the toolbar's view-mode cycle,
 // auto-applies on iOS when the `readingByDefaultOnMobile` setting is on.
-export type ViewMode = 'edit' | 'preview' | 'split' | 'liveEdit' | 'reading';
+//
+// `agent` is a split like `split`: the note stays on the left and the
+// agent chat fills the right pane (it no longer sits in the sidebar).
+export type ViewMode = 'edit' | 'preview' | 'split' | 'liveEdit' | 'reading' | 'agent';
 export type Theme =
   | 'light'
   | 'dark'

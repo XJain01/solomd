@@ -28,7 +28,6 @@ const FormulaEditor = defineAsyncComponent(() => import('./components/FormulaEdi
 const TypesPanel = defineAsyncComponent(() => import('./components/TypesPanel.vue'));
 const HistoryPanel = defineAsyncComponent(() => import('./components/HistoryPanel.vue'));
 const PropertiesInspector = defineAsyncComponent(() => import('./components/PropertiesInspector.vue'));
-const AgentPanel = defineAsyncComponent(() => import('./components/AgentPanel.vue'));
 import RsSplitter from './components/RsSplitter.vue';
 import { useAutoCommit } from './composables/useAutoCommit';
 import { useGithubSync } from './composables/useGithubSync';
@@ -40,6 +39,8 @@ const BasesView = defineAsyncComponent(() => import('./components/BasesView.vue'
 import { BASES_OPEN_EVENT, BASES_CLOSE_EVENT } from './composables/useBasesView';
 const InboxView = defineAsyncComponent(() => import('./components/InboxView.vue'));
 import { INBOX_OPEN_EVENT, INBOX_CLOSE_EVENT } from './composables/useInboxView';
+const KanbanView = defineAsyncComponent(() => import('./components/KanbanView.vue'));
+import { KANBAN_OPEN_EVENT, KANBAN_CLOSE_EVENT } from './composables/useKanbanView';
 // v4.6.1 F2 — Type lens (center-pane filtered view of one type's members).
 const TypeLensView = defineAsyncComponent(() => import('./components/TypeLensView.vue'));
 import { TYPE_LENS_OPEN_EVENT, TYPE_LENS_CLOSE_EVENT } from './composables/useTypeLens';
@@ -268,8 +269,7 @@ function ctxToggle(toggleFn: () => void) {
     !settings.showTasksPanel &&
     !showNeighborhoodPane.value &&
     !settings.showTypesPanel &&
-    !settings.showHistoryPanel &&
-    (IS_APP_STORE_BUILD || !settings.showAgentPanel);
+    !settings.showHistoryPanel;
   if (noPanesVisible) {
     settings.hideRightSidebarFromPane(before);
   } else if (settings.rightSidebarHidden) {
@@ -972,6 +972,7 @@ const INSERT_SNIPPETS: Record<string, string> = {
   'insert.table': '\n| $|$ | Header |\n| --- | --- |\n| cell | cell |\n',
   'insert.mermaid': MERMAID_INSERT_SNIPPET,
   'insert.hr': '\n---\n',
+  'insert.callout': '\n> [!note]\n> $|$\n',
 };
 
 /**
@@ -1662,10 +1663,18 @@ function onAIRewriteAccept(e: Event) {
 function onAIRewriteCancel() {
   // No-op for now; AIRewriteOverlay self-closes.
 }
-function onOpenBases() { basesOpen.value = true; viewOpen.value = false; typeLensOpen.value = false; }
+function onOpenBases() { basesOpen.value = true; viewOpen.value = false; typeLensOpen.value = false; kanbanOpen.value = false; }
 function onCloseBases() { basesOpen.value = false; }
-function onOpenInbox() { inboxViewOpen.value = true; typeLensOpen.value = false; }
+function onOpenInbox() { inboxViewOpen.value = true; kanbanOpen.value = false; typeLensOpen.value = false; }
 function onCloseInbox() { inboxViewOpen.value = false; }
+function onOpenKanban() {
+  kanbanOpen.value = true;
+  inboxViewOpen.value = false;
+  basesOpen.value = false;
+  typeLensOpen.value = false;
+  viewOpen.value = false;
+}
+function onCloseKanban() { kanbanOpen.value = false; }
 // v4.6.1 F2 — type lens content swap. Mutually exclusive with the other
 // center-pane overlays (mirrors basesOpen / inboxViewOpen). The open event
 // carries which type to focus; we pass it down as a prop so the view is
@@ -1677,11 +1686,12 @@ function onOpenTypeLens(e: Event) {
   typeLensOpen.value = true;
   basesOpen.value = false;
   inboxViewOpen.value = false;
+  kanbanOpen.value = false;
   viewOpen.value = false;
 }
 function onCloseTypeLens() { typeLensOpen.value = false; }
 // v4.6 F5 — saved-view content swap.
-function onOpenView() { viewOpen.value = true; basesOpen.value = false; typeLensOpen.value = false; }
+function onOpenView() { viewOpen.value = true; basesOpen.value = false; typeLensOpen.value = false; kanbanOpen.value = false; }
 function onCloseView() { viewOpen.value = false; }
 
 async function onWikiOpen(e: Event) {
@@ -1754,6 +1764,7 @@ function onOpenAgentWizard() {
 
 function onLeaveCenterOverlay() {
   if (inboxViewOpen.value) inboxViewOpen.value = false;
+  if (kanbanOpen.value) kanbanOpen.value = false;
   if (basesOpen.value) basesOpen.value = false;
   if (typeLensOpen.value) typeLensOpen.value = false;
   if (viewOpen.value) viewOpen.value = false;
@@ -1766,6 +1777,8 @@ window.addEventListener(BASES_OPEN_EVENT, onOpenBases as EventListener);
 window.addEventListener(BASES_CLOSE_EVENT, onCloseBases as EventListener);
 window.addEventListener(INBOX_OPEN_EVENT, onOpenInbox as EventListener);
 window.addEventListener(INBOX_CLOSE_EVENT, onCloseInbox as EventListener);
+window.addEventListener(KANBAN_OPEN_EVENT, onOpenKanban as EventListener);
+window.addEventListener(KANBAN_CLOSE_EVENT, onCloseKanban as EventListener);
 window.addEventListener(TYPE_LENS_OPEN_EVENT, onOpenTypeLens as EventListener);
 window.addEventListener(TYPE_LENS_CLOSE_EVENT, onCloseTypeLens as EventListener);
 window.addEventListener(VIEW_OPEN_EVENT, onOpenView as EventListener);
@@ -1799,6 +1812,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('solomd:leave-center-overlay', onLeaveCenterOverlay);
   window.removeEventListener(INBOX_OPEN_EVENT, onOpenInbox as EventListener);
   window.removeEventListener(INBOX_CLOSE_EVENT, onCloseInbox as EventListener);
+  window.removeEventListener(KANBAN_OPEN_EVENT, onOpenKanban as EventListener);
+  window.removeEventListener(KANBAN_CLOSE_EVENT, onCloseKanban as EventListener);
   window.removeEventListener(TYPE_LENS_OPEN_EVENT, onOpenTypeLens as EventListener);
   window.removeEventListener(TYPE_LENS_CLOSE_EVENT, onCloseTypeLens as EventListener);
   window.removeEventListener(VIEW_OPEN_EVENT, onOpenView as EventListener);
@@ -1874,10 +1889,8 @@ const showInspectorPane = computed(
     tabs.activeTab?.language === 'markdown' &&
     !!workspace.currentFolder,
 );
-// v4.0 pillar 1: Agent Panel — workspace-level visibility (not per-tab).
-// Toggled via command palette `view.toggleAgentPanel`; persists in settings.
-// App Store builds strip the AI/Agent surface entirely (Apple 3.1.1).
-const showAgentPane = computed(() => !IS_APP_STORE_BUILD && settings.showAgentPanel);
+// The agent chat is a view mode (editor | chat), not a sidebar pane.
+// `showAgentPanel` remains in saved settings so older layouts still load.
 // v4.0.2 — search is a session-only pane (PR #50). ⌘⇧F toggles searchOpen;
 // no setting persisted because users don't want search living in their
 // sidebar across launches.
@@ -2017,6 +2030,7 @@ watch(
   (v) => {
     if (v !== 'home') return;
     inboxViewOpen.value = false;
+    kanbanOpen.value = false;
     basesOpen.value = false;
     typeLensOpen.value = false;
   },
@@ -2044,8 +2058,7 @@ const rightSidebarHasRenderablePane = computed(
     showNeighborhoodPane.value ||
     showTypesPane.value ||
     showHistoryPane.value ||
-    showInspectorPane.value ||
-    showAgentPane.value,
+    showInspectorPane.value,
 );
 
 const showRightSidebar = computed(() => {
@@ -2117,7 +2130,7 @@ const visibleRsPanes = computed(() => {
     types: showTypesPane.value,
     history: showHistoryPane.value,
     inspector: showInspectorPane.value,
-    agent: showAgentPane.value,
+    agent: false,
   };
   const known = ['search', 'outline', 'backlinks', 'relationships', 'tags', 'tasks', 'neighborhood', 'types', 'history', 'inspector', 'agent'] as const;
   const ordered: string[] = [];
@@ -2225,10 +2238,7 @@ function paneStyle(id: string) {
 // bumps to 440 when the agent panel is on (chat needs real estate).
 // User resizes above the auto-bump are honored.
 const sideSidebarStyle = computed(() => {
-  const w =
-    showAgentPane.value && settings.sideSidebarWidth <= 260
-      ? 440
-      : settings.sideSidebarWidth;
+  const w = settings.sideSidebarWidth;
   return { width: `${w}px`, flexBasis: `${w}px` };
 });
 
@@ -2258,6 +2268,7 @@ function onSidebarResize(side: 'left' | 'right', ev: MouseEvent) {
 }
 const basesOpen = ref(false);
 const inboxViewOpen = ref(false);
+const kanbanOpen = ref(false);
 // v4.6.1 F2 — type lens (full-pane filtered list of one type's members).
 const typeLensOpen = ref(false);
 const typeLensName = ref('');
@@ -2308,29 +2319,26 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
     }"
   >
     <!--
-      v2.4 reading mode swaps out the entire toolbar / sidebar / status-bar
-      stack for a single ReadingView component. We keep all the modal
-      dialogs (settings, palette, etc.) mounted at the bottom so the user
-      can still summon them from inside reading mode if needed.
+      v2.4 reading mode shows a single ReadingView component while keeping the
+      workspace shell mounted via v-show (#512 / #516) so the editor's undo/redo
+      stack and scroll/DOM state survive entering and leaving reading mode.
     -->
-    <template v-if="settings.viewMode === 'reading'">
-      <ReadingView />
-    </template>
-    <template v-else>
-      <!-- 5.0 window (docs/v5-ui-spec.md §3): on Windows a 44px frameless title
-           bar spans the window; below it — and on every other platform at the
-           top — the sidebar runs full height beside a column holding the 52px
-           header and the workspace. On macOS the traffic lights sit in the
-           sidebar's top inset, or over the header when the sidebar is hidden. -->
-      <Toolbar
-        v-if="winTitleBar"
-        variant="titlebar"
-        @open-palette="paletteOpen = true"
-        @open-settings="openSettingsAt()"
-        @open-help="helpOpen = true"
-        @open-search="toggleGlobalSearch()"
-      />
-      <div class="shell">
+    <ReadingView v-if="settings.viewMode === 'reading'" />
+    <!-- 5.0 window (docs/v5-ui-spec.md §3): on Windows a 44px frameless title
+         bar spans the window; below it — and on every other platform at the
+         top — the sidebar runs full height beside a column holding the 52px
+         header and the workspace. On macOS the traffic lights sit in the
+         sidebar's top inset, or over the header when the sidebar is hidden. -->
+    <Toolbar
+      v-if="winTitleBar"
+      v-show="settings.viewMode !== 'reading'"
+      variant="titlebar"
+      @open-palette="paletteOpen = true"
+      @open-settings="openSettingsAt()"
+      @open-help="helpOpen = true"
+      @open-search="toggleGlobalSearch()"
+    />
+    <div v-show="settings.viewMode !== 'reading'" class="shell">
         <!-- #168 — on a phone the side panes float over the editor instead of
              stealing its width; this catches the tap that dismisses them. -->
         <div
@@ -2426,21 +2434,17 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
               />
               <HistoryPanel v-if="p.id === 'history'" @close="ctxToggle(() => settings.toggleHistoryPanel())" />
               <PropertiesInspector v-if="p.id === 'inspector'" @close="ctxToggle(() => settings.toggleInspector())" />
-              <AgentPanel
-                v-if="p.id === 'agent'"
-                @open-settings="(section?: string) => openSettingsAt(section ?? 'integrations')"
-                @close="ctxToggle(() => settings.toggleAgentPanel())"
-              />
             </div>
           </template>
         </aside>
         <div class="content">
           <BasesView v-if="basesOpen" />
           <InboxView v-else-if="inboxViewOpen" />
+          <KanbanView v-else-if="kanbanOpen" />
           <TypeLensView v-else-if="typeLensOpen" :type-name="typeLensName" />
           <ViewNoteList v-else-if="viewPaneVisible" />
           <TileRoot v-else :node="tiles.root" @cursor="onCursor" @selection="onSelection" />
-          <StatsPill v-if="!basesOpen && !inboxViewOpen && !typeLensOpen && !viewPaneVisible" :line="cursorLine" :col="cursorCol" :selection-text="selectionText" />
+          <StatsPill v-if="!basesOpen && !inboxViewOpen && !kanbanOpen && !typeLensOpen && !viewPaneVisible" :line="cursorLine" :col="cursorCol" :selection-text="selectionText" />
         </div>
         <aside
           v-if="showRightSidebar && settings.outlineSide !== 'left'"
@@ -2493,11 +2497,6 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
               />
               <HistoryPanel v-if="p.id === 'history'" @close="ctxToggle(() => settings.toggleHistoryPanel())" />
               <PropertiesInspector v-if="p.id === 'inspector'" @close="ctxToggle(() => settings.toggleInspector())" />
-              <AgentPanel
-                v-if="p.id === 'agent'"
-                @open-settings="(section?: string) => openSettingsAt(section ?? 'integrations')"
-                @close="ctxToggle(() => settings.toggleAgentPanel())"
-              />
             </div>
           </template>
         </aside>
@@ -2566,14 +2565,13 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
             <span class="sidebar-ctx__check">{{ settings.showHistoryPanel ? '✓' : '' }}</span>
             {{ t('rsPane.history') }}
           </label>
-          <label v-if="!IS_APP_STORE_BUILD" class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleAgentPanel() })">
-            <span class="sidebar-ctx__check">{{ settings.showAgentPanel ? '✓' : '' }}</span>
-            {{ t('rsPane.agent') }}
+          <label v-if="!IS_APP_STORE_BUILD" class="sidebar-ctx__item" @click="closeSidebarCtx(); settings.toggleAgentPanel()">
+            <span class="sidebar-ctx__check">{{ settings.viewMode === 'agent' ? '✓' : '' }}</span>
+            {{ t('header.segAgent') }}
           </label>
         </div>
         <div v-if="sidebarCtx" class="sidebar-ctx__backdrop" @click="closeSidebarCtx" />
       </Teleport>
-    </template>
 
     <AIRewriteOverlay
       v-if="!IS_APP_STORE_BUILD"

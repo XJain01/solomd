@@ -282,6 +282,9 @@ interface Settings {
   // #459: last view mode the user was in before entering preview mode, so
   // `view.togglePreview` flips back to their editing mode (`liveEdit`/`edit`/`split`).
   lastNonPreviewViewMode: ViewMode;
+  // Mode to restore when leaving the agent split (toolbar segment or the
+  // panel's close button). Never 'agent' or 'reading'.
+  lastNonAgentViewMode: ViewMode;
   // #458: WebDAV workspace sync configuration (Nutstore / Nextcloud / AList / Synology).
   webdavEnabled: boolean;
   webdavUrl: string;
@@ -358,6 +361,9 @@ interface Settings {
   // academic) a Word export starts from. A per-document `docx:` front-matter
   // block overrides individual keys, the same way `pdf:` does.
   docxPreset: 'plain' | 'report' | 'academic';
+  // #503 — Optional default export directory. When empty, exports default to
+  // the current note's own directory (#260).
+  defaultExportDir: string;
   // Print / system-PDF palette, independent of the app theme. Printing in a
   // dark theme put a dark slab on paper and wasted ink; `light` (the default)
   // always prints on white, `dark` prints the dark palette on purpose, and
@@ -766,6 +772,7 @@ function defaults(): Settings {
     readingByDefaultOnMobile: false,
     lastNonReadingViewMode: 'liveEdit',
     lastNonPreviewViewMode: 'liveEdit',
+    lastNonAgentViewMode: 'liveEdit',
     webdavEnabled: false,
     webdavUrl: '',
     webdavUsername: '',
@@ -833,6 +840,7 @@ function defaults(): Settings {
     rsPaneOrder: ['search', 'outline', 'backlinks', 'relationships', 'tags', 'tasks', 'neighborhood', 'types', 'history', 'inspector', 'agent'],
     previewFontSize: 16,
     attachmentMode: 'shared',
+    defaultExportDir: '',
     assetsDirName: '_assets',
     attachmentCustomPath: './images/${filename}/',
     imageUploader: 'none',
@@ -1097,6 +1105,10 @@ export const useSettingsStore = defineStore('settings', {
       this.persist();
     },
     setViewMode(mode: ViewMode) {
+      if (mode === 'agent' && this.viewMode !== 'agent') {
+        const prev = this.viewMode === 'reading' ? this.lastNonReadingViewMode : this.viewMode;
+        this.lastNonAgentViewMode = prev === 'agent' || prev === 'reading' ? 'liveEdit' : prev;
+      }
       // Remember whatever non-reading mode we were in before — the
       // reading-mode close button / Esc handler restores it.
       if (mode !== 'reading' && this.viewMode !== 'reading') {
@@ -1109,6 +1121,12 @@ export const useSettingsStore = defineStore('settings', {
       }
       this.viewMode = mode;
       this.persist();
+    },
+    /** Leave the agent split and return to the mode that was open before it. */
+    exitAgentMode() {
+      const next = this.lastNonAgentViewMode;
+      const safe: ViewMode = next && next !== 'agent' && next !== 'reading' ? next : 'liveEdit';
+      this.setViewMode(safe);
     },
     cycleViewMode() {
       // `liveEdit` (v2.3) joins the cycle — order chosen so the WYSIWYG
@@ -1303,7 +1321,7 @@ export const useSettingsStore = defineStore('settings', {
           this.showAgentPanel = saved.showAgentPanel;
           this._rsPanesBeforeHide = null;
         }
-        if (!this.showBacklinks && !this.showRelationships && !this.showTagsPanel && !this.showTypesPanel && !this.showNeighborhood && !this.showHistoryPanel && !this.showAgentPanel) {
+        if (!this.showBacklinks && !this.showRelationships && !this.showTagsPanel && !this.showTypesPanel && !this.showNeighborhood && !this.showHistoryPanel) {
           this.showBacklinks = true;
           this.showTagsPanel = true;
         }
@@ -1475,10 +1493,10 @@ export const useSettingsStore = defineStore('settings', {
       if (this.showTypesPanel) this.ensureRightSidebarVisible();
       this.persist();
     },
+    /** Open or leave the agent split. The chat lives in that view, not the sidebar. */
     toggleAgentPanel() {
-      this.showAgentPanel = !this.showAgentPanel;
-      if (this.showAgentPanel) this.ensureRightSidebarVisible();
-      this.persist();
+      if (this.viewMode === 'agent') this.exitAgentMode();
+      else this.setViewMode('agent');
     },
     toggleAgentAllowWrite() {
       this.agentAllowWrite = !this.agentAllowWrite;
@@ -1831,6 +1849,10 @@ export const useSettingsStore = defineStore('settings', {
     setAttachmentMode(mode: 'shared' | 'per-file' | 'custom') {
       this.attachmentMode =
         mode === 'per-file' ? 'per-file' : mode === 'custom' ? 'custom' : 'shared';
+      this.persist();
+    },
+    setDefaultExportDir(dir: string) {
+      this.defaultExportDir = (dir || '').trim();
       this.persist();
     },
     // #7 — Typora-style custom path template (used when attachmentMode==='custom').

@@ -130,7 +130,7 @@ test('C1 section 四 / 六 / Part-1 commands all have a menu entry', () => {
     // Paragraph
     'fmt.h1', 'fmt.h2', 'fmt.h3', 'fmt.h4', 'fmt.h5', 'fmt.h6', 'heading.promote', 'heading.demote',
     'heading.paragraph', 'fmt.ul', 'fmt.ol', 'fmt.task', 'fmt.quote', 'fmt.codeblock',
-    'editor.tableEditor', 'editor.formulaEditor', 'insert.mathBlock', 'insert.mermaid', 'insert.table', 'insert.hr',
+    'editor.tableEditor', 'editor.formulaEditor', 'insert.mathBlock', 'insert.mermaid', 'insert.table', 'insert.hr', 'insert.callout',
     // Format
     'fmt.bold', 'fmt.italic', 'fmt.strike', 'fmt.code', 'insert.mathInline', 'fmt.link',
     'editor.insertImage', 'editor.insertImageUrl',
@@ -138,7 +138,7 @@ test('C1 section 四 / 六 / Part-1 commands all have a menu entry', () => {
     'palette.open', 'quickSwitcher.open', 'search.global', 'edit.find', 'tab.prev', 'tab.next',
     'tile.splitRight', 'tile.splitDown', 'tile.focusNext', 'tile.focusPrev',
     // View
-    'view.mode:edit', 'view.mode:split', 'view.mode:liveEdit', 'view.mode:preview', 'view.mode:reading',
+    'view.mode:edit', 'view.mode:split', 'view.mode:liveEdit', 'view.mode:preview', 'view.mode:agent', 'view.mode:reading',
     'view.toggleLiveEdit', 'view.cycleView', 'view.slideshow', 'view.toggleFileTree',
     'view.toggleRightSidebar', 'view.toggleOutline', 'view.toggleInspector', 'view.toggleToolbar',
     'fold.toggle', 'fold.all', 'fold.none', 'view.toggleFocusMode', 'view.toggleTypewriter',
@@ -158,7 +158,7 @@ test('every menu id is something App.vue can dispatch', () => {
     'view.zoomPreviewIn', 'view.zoomPreviewOut', 'view.zoomPreviewReset', 'help.shortcuts', 'help.cli',
     'help.checkUpdate', 'help.about', 'edit.find', 'edit.replace', 'edit.undo', 'edit.redo', 'edit.cut', 'edit.copy',
     'edit.paste', 'edit.selectAll', 'insert.mathBlock', 'insert.mathInline', 'insert.table',
-    'insert.mermaid', 'insert.hr',
+    'insert.mermaid', 'insert.hr', 'insert.callout',
     // palette commands
     'export.html', 'export.docx', 'export.pdf', 'export.image', 'clean.aiArtifacts',
     'view.toggleSpellCheck', 'view.toggleLivePreview', 'view.toggleFitWidth', 'pomodoro.open',
@@ -307,6 +307,7 @@ test('menu coverage: pane / wrap / line-number / auto-commit check marks follow 
 test('menu coverage: AI and git entries follow their availability flags', () => {
   const store = ids(buildAppMenu(ctx({ aiAvailable: false })));
   assert.ok(!store.includes('view.toggleAgentPanel'), 'App Store builds have no AI panel');
+  assert.ok(!store.includes('view.mode:agent'), 'App Store builds have no agent view mode');
   assert.ok(!store.includes('editor.aiRewrite'));
   const android = buildAppMenu(ctx({ gitAvailable: false }));
   assert.equal(submenu(android, 'syncHistory'), undefined, 'no git backend → no 同步与历史');

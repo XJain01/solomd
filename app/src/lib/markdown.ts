@@ -14,6 +14,7 @@ import { numberEquations } from './equations';
 import { parseImageAltSize } from './md-image-url';
 import { sanitizeRenderedHtml } from './sanitize-html';
 import { getHljs, getKatex } from './render-deps';
+import { calloutTitleHtml, parseCalloutMarker } from './callouts';
 
 // NOTE: `@hedgedoc/markdown-it-task-lists` is installed but unusable here —
 // its compiled ESM entry does `import Token from 'markdown-it/lib/token.js'`
@@ -636,18 +637,18 @@ md.core.ruler.after('inline', 'task_lists', (state) => {
   return false;
 });
 
-// GitHub-style callouts: a blockquote whose first line is `[!NOTE]` (or TIP /
-// IMPORTANT / WARNING / CAUTION) renders as a tinted callout card with a
-// label row — the syntax GitHub and Obsidian users expect to just work. The
-// marker line is stripped; the label/icon comes from CSS (`.md-callout`) so
-// every consumer of the rendered HTML (preview, live blocks, print overlay)
-// styles it without extra plumbing. Unknown `[!TYPES]` are left as plain
-// blockquote text on purpose.
+// Obsidian / GitHub callouts. A blockquote whose first line is `[!type]`,
+// `[!type] Title`, or `[!type]+` / `[!type]-` becomes a tinted card. Foldable
+// ones are `<details>`. Unknown types use the note color. Nested blockquotes
+// are visited too, so a callout can contain another callout.
 md.core.ruler.after('inline', 'github_callouts', (state) => {
   const tokens = state.tokens;
-  const CALLOUT_RE = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*/i;
+  const opens: number[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    if (tokens[i].type !== 'blockquote_open') continue;
+    if (tokens[i].type === 'blockquote_open') opens.push(i);
+  }
+  for (let n = opens.length - 1; n >= 0; n--) {
+    const i = opens[n];
     const pOpen = tokens[i + 1];
     const inline = tokens[i + 2];
     if (
@@ -655,23 +656,56 @@ md.core.ruler.after('inline', 'github_callouts', (state) => {
       pOpen.type !== 'paragraph_open' ||
       !inline ||
       inline.type !== 'inline' ||
-      !inline.children ||
-      inline.children.length === 0
+      !inline.children?.length
     ) {
       continue;
     }
     const first = inline.children[0];
     if (first.type !== 'text') continue;
-    const m = CALLOUT_RE.exec(first.content);
-    if (!m) continue;
-    const kind = m[1].toLowerCase();
-    tokens[i].attrJoin('class', `md-callout md-callout--${kind}`);
-    first.content = first.content.slice(m[0].length);
-    if (first.content === '') {
-      // Marker sat alone on its line — drop the empty text node and the
-      // line break that followed it so the body starts flush.
-      const next = inline.children[1];
-      inline.children.splice(0, next && (next.type === 'softbreak' || next.type === 'hardbreak') ? 2 : 1);
+    const info = parseCalloutMarker(first.content);
+    if (!info) continue;
+
+    let depth = 0;
+    let close = -1;
+    for (let j = i; j < tokens.length; j++) {
+      if (tokens[j].type === 'blockquote_open') depth++;
+      else if (tokens[j].type === 'blockquote_close') {
+        depth--;
+        if (depth === 0) { close = j; break; }
+      }
+    }
+    if (close < 0) continue;
+
+    const titleInner = calloutTitleHtml(info);
+    const titleHtml = info.fold === 'none'
+      ? `<div class="md-callout__title">${titleInner}</div>\n`
+      : `<summary class="md-callout__title">${titleInner}</summary>\n`;
+    const titleTok = new state.Token('html_block', '', 0);
+    titleTok.content = titleHtml;
+
+    // The header line is not body text.
+    const br = inline.children[1];
+    inline.children.splice(0, br && (br.type === 'softbreak' || br.type === 'hardbreak') ? 2 : 1);
+    if (inline.children.length === 0) {
+      tokens.splice(i + 1, 3);
+    }
+    tokens.splice(i + 1, 0, titleTok);
+
+    const open = tokens[i];
+    open.tag = info.fold === 'none' ? 'blockquote' : 'details';
+    open.attrJoin('class', `md-callout md-callout--${info.canonical}`);
+    open.attrSet('data-callout', info.rawType.toLowerCase());
+    if (info.fold === 'open') open.attrSet('open', 'open');
+    let depth2 = 0;
+    for (let j = i; j < tokens.length; j++) {
+      if (tokens[j].type === 'blockquote_open') depth2++;
+      else if (tokens[j].type === 'blockquote_close') {
+        depth2--;
+        if (depth2 === 0) {
+          tokens[j].tag = open.tag;
+          break;
+        }
+      }
     }
   }
 });
