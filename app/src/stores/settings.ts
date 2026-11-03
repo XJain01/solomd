@@ -974,6 +974,16 @@ function load(): Settings {
         merged.showAgentPanel = true;
         merged.v4AgentPanelMigrated = true;
       }
+      // Agent used to be a fifth view mode. Keep the panel open and return
+      // the editor to the mode it was in before that.
+      if (merged.viewMode === 'agent') {
+        const prev = merged.lastNonAgentViewMode;
+        merged.viewMode = prev && prev !== 'agent' && prev !== 'reading' ? prev : 'liveEdit';
+        merged.showAgentPanel = true;
+      }
+      if (merged.lastNonPreviewViewMode === 'agent') merged.lastNonPreviewViewMode = 'liveEdit';
+      if (merged.lastNonReadingViewMode === 'agent') merged.lastNonReadingViewMode = 'liveEdit';
+      if (merged.lastNonAgentViewMode === 'agent') merged.lastNonAgentViewMode = 'liveEdit';
       // v4.3.x — file tree default flipped to "on" for desktop. Existing
       // installs (where the saved blob has the key as `false`) get the
       // sidebar opened once on next launch; mobile is skipped so phones
@@ -1105,9 +1115,17 @@ export const useSettingsStore = defineStore('settings', {
       this.persist();
     },
     setViewMode(mode: ViewMode) {
-      if (mode === 'agent' && this.viewMode !== 'agent') {
-        const prev = this.viewMode === 'reading' ? this.lastNonReadingViewMode : this.viewMode;
-        this.lastNonAgentViewMode = prev === 'agent' || prev === 'reading' ? 'liveEdit' : prev;
+      // Agent is a sidebar panel, not a content mode. Older builds stored
+      // viewMode 'agent'; opening it again just shows the panel.
+      if (mode === 'agent') {
+        this.showAgentPanel = true;
+        if (this.viewMode === 'agent') {
+          const prev = this.lastNonAgentViewMode;
+          this.viewMode = prev && prev !== 'agent' && prev !== 'reading' ? prev : 'liveEdit';
+        }
+        this.ensureRightSidebarVisible();
+        this.persist();
+        return;
       }
       // Remember whatever non-reading mode we were in before — the
       // reading-mode close button / Esc handler restores it.
@@ -1122,11 +1140,15 @@ export const useSettingsStore = defineStore('settings', {
       this.viewMode = mode;
       this.persist();
     },
-    /** Leave the agent split and return to the mode that was open before it. */
+    /** Close the agent panel. If a previous build left viewMode on 'agent',
+     *  restore the content mode that was open before that. */
     exitAgentMode() {
-      const next = this.lastNonAgentViewMode;
-      const safe: ViewMode = next && next !== 'agent' && next !== 'reading' ? next : 'liveEdit';
-      this.setViewMode(safe);
+      if (this.viewMode === 'agent') {
+        const next = this.lastNonAgentViewMode;
+        this.viewMode = next && next !== 'agent' && next !== 'reading' ? next : 'liveEdit';
+      }
+      this.showAgentPanel = false;
+      this.persist();
     },
     cycleViewMode() {
       // `liveEdit` (v2.3) joins the cycle — order chosen so the WYSIWYG
@@ -1147,7 +1169,9 @@ export const useSettingsStore = defineStore('settings', {
     togglePreviewMode() {
       if (this.viewMode === 'preview') {
         const next =
-          this.lastNonPreviewViewMode === 'preview' || this.lastNonPreviewViewMode === 'reading'
+          this.lastNonPreviewViewMode === 'preview' ||
+          this.lastNonPreviewViewMode === 'reading' ||
+          this.lastNonPreviewViewMode === 'agent'
             ? 'liveEdit'
             : this.lastNonPreviewViewMode;
         this.setViewMode(next);
@@ -1177,7 +1201,9 @@ export const useSettingsStore = defineStore('settings', {
     exitReadingMode() {
       // Defensive: never exit *into* reading mode (would loop). Default
       // back to 'edit' if the saved sentinel is somehow 'reading'.
-      const next = this.lastNonReadingViewMode === 'reading' ? 'edit' : this.lastNonReadingViewMode;
+      const next = this.lastNonReadingViewMode === 'reading' || this.lastNonReadingViewMode === 'agent'
+        ? 'edit'
+        : this.lastNonReadingViewMode;
       this.viewMode = next;
       this.persist();
     },
@@ -1321,7 +1347,7 @@ export const useSettingsStore = defineStore('settings', {
           this.showAgentPanel = saved.showAgentPanel;
           this._rsPanesBeforeHide = null;
         }
-        if (!this.showBacklinks && !this.showRelationships && !this.showTagsPanel && !this.showTypesPanel && !this.showNeighborhood && !this.showHistoryPanel) {
+        if (!this.showBacklinks && !this.showRelationships && !this.showTagsPanel && !this.showTypesPanel && !this.showNeighborhood && !this.showHistoryPanel && !this.showAgentPanel) {
           this.showBacklinks = true;
           this.showTagsPanel = true;
         }
@@ -1493,10 +1519,15 @@ export const useSettingsStore = defineStore('settings', {
       if (this.showTypesPanel) this.ensureRightSidebarVisible();
       this.persist();
     },
-    /** Open or leave the agent split. The chat lives in that view, not the sidebar. */
+    /** Open or close the agent sidebar. Does not change the content mode. */
     toggleAgentPanel() {
-      if (this.viewMode === 'agent') this.exitAgentMode();
-      else this.setViewMode('agent');
+      if (this.viewMode === 'agent') {
+        const next = this.lastNonAgentViewMode;
+        this.viewMode = next && next !== 'agent' && next !== 'reading' ? next : 'liveEdit';
+      }
+      this.showAgentPanel = !this.showAgentPanel;
+      if (this.showAgentPanel) this.ensureRightSidebarVisible();
+      this.persist();
     },
     toggleAgentAllowWrite() {
       this.agentAllowWrite = !this.agentAllowWrite;

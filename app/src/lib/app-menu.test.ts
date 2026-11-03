@@ -138,7 +138,7 @@ test('C1 section 四 / 六 / Part-1 commands all have a menu entry', () => {
     'palette.open', 'quickSwitcher.open', 'search.global', 'edit.find', 'tab.prev', 'tab.next',
     'tile.splitRight', 'tile.splitDown', 'tile.focusNext', 'tile.focusPrev',
     // View
-    'view.mode:edit', 'view.mode:split', 'view.mode:liveEdit', 'view.mode:preview', 'view.mode:agent', 'view.mode:reading',
+    'view.mode:edit', 'view.mode:split', 'view.mode:liveEdit', 'view.mode:preview', 'view.mode:reading',
     'view.toggleLiveEdit', 'view.cycleView', 'view.slideshow', 'view.toggleFileTree',
     'view.toggleRightSidebar', 'view.toggleOutline', 'view.toggleInspector', 'view.toggleToolbar',
     'fold.toggle', 'fold.all', 'fold.none', 'view.toggleFocusMode', 'view.toggleTypewriter',

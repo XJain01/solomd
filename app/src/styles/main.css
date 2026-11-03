@@ -642,29 +642,63 @@ button:disabled {
   font-family: var(--font-mono);
 }
 
-/* Obsidian callouts (`> [!note]`). Color is per type; unknown types use note. */
-.md-callout {
+/* Obsidian callouts (`> [!note]`). Color is per type; unknown types use note.
+   The title is its own full-width band. Body lines stay contiguous: the
+   editor inherits `white-space: pre`, which would otherwise turn each
+   `<br>` plus the following newline into a blank line, and preview
+   paragraph margins would pad every line. */
+blockquote.md-callout,
+details.md-callout,
+.preview-content blockquote.md-callout,
+.preview-content details.md-callout,
+.cm-live-block--callout .md-callout {
   --callout: #4c8bf5;
-  border: 1px solid color-mix(in srgb, var(--callout) 35%, transparent);
-  border-left: 4px solid var(--callout);
+  border: 1px solid color-mix(in srgb, var(--callout) 32%, transparent);
+  border-left: 3px solid var(--callout);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--callout) 12%, var(--bg));
-  padding: 2px 0 4px;
-  margin: 0.9em 0;
+  background: color-mix(in srgb, var(--callout) 9%, var(--bg));
+  padding: 0;
+  margin: 0.6em 0;
+  color: var(--text);
+  overflow: hidden;
+  white-space: normal;
+  line-height: 1.45;
 }
 .md-callout__title {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px 6px;
+  margin: 0;
+  padding: 6px 12px;
   font-weight: 650;
+  line-height: 1.3;
   color: var(--callout);
+  background: color-mix(in srgb, var(--callout) 26%, var(--bg));
   cursor: default;
   list-style: none;
 }
 .md-callout__title::-webkit-details-marker { display: none; }
 details.md-callout > .md-callout__title { cursor: pointer; }
-.md-callout__icon { font-size: 1.05em; line-height: 1; }
+.md-callout__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 1.05em;
+  height: 1.05em;
+  line-height: 0;
+}
+.md-callout__icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.md-callout__icon svg,
+.md-callout__icon svg * {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .md-callout__label { flex: 1 1 auto; min-width: 0; }
 .md-callout__fold::before { content: '▸'; font-size: 0.85em; }
 details[open] > .md-callout__title .md-callout__fold::before { content: '▾'; }
@@ -672,7 +706,19 @@ details[open] > .md-callout__title .md-callout__fold::before { content: '▾'; }
   margin-left: 12px;
   margin-right: 12px;
 }
+.preview-content .md-callout p,
+.cm-live-block--callout .md-callout p,
+blockquote.md-callout > p,
+details.md-callout > p,
+.md-callout li {
+  margin-top: 0;
+  margin-bottom: 0;
+  line-height: 1.45;
+}
+.md-callout > .md-callout__title + * { margin-top: 6px; }
 .md-callout > :last-child { margin-bottom: 8px; }
+/* A real blank line is a second paragraph; keep a small gap only then. */
+.md-callout p + p { margin-top: 0.45em; }
 .md-callout--note { --callout: #4c8bf5; }
 .md-callout--abstract { --callout: #00b3a4; }
 .md-callout--info { --callout: #4c8bf5; }

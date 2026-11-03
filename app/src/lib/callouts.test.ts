@@ -24,6 +24,14 @@ test('callout block stops at a line without >', () => {
   assert.equal(calloutEndLine(lines, 1), null);
 });
 
+test('info callout uses an svg icon and keeps body lines in one paragraph', () => {
+  const html = renderMarkdown('> [!info] 阿斯顿发斯蒂芬\n> 阿斯顿发斯蒂芬\n> 撒旦法水电费\n');
+  assert.match(html, /md-callout--info/);
+  assert.match(html, /<svg/);
+  assert.doesNotMatch(html, /md-callout__icon[^<]*>ℹ/);
+  assert.equal((html.match(/<p[\s>]/g) || []).length, 1);
+});
+
 test('preview renders a foldable callout with a custom title', () => {
   const html = renderMarkdown('> [!warning]- Watch\n> Do not\n');
   assert.match(html, /md-callout--warning/);

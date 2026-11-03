@@ -545,6 +545,9 @@ class CalloutWidget extends WidgetType {
   toDOM(): HTMLElement {
     const wrap = document.createElement('div');
     wrap.className = 'cm-live-block cm-live-block--callout';
+    // The editor content is `white-space: pre`. Without this, each body
+    // line's `<br>` plus the newline markdown-it emits becomes a blank row.
+    wrap.style.whiteSpace = 'normal';
     wrap.innerHTML = renderMarkdown(this.source);
     return wrap;
   }
@@ -1853,6 +1856,11 @@ export const liveBlocksTheme = EditorView.theme({
   },
   // v4.3.0 issue #57a — paddings fold in the 0.6em that used to come from the
   // shared margin (see #155 note above) so the visual rhythm is unchanged.
+  '.cm-live-block--callout': {
+    whiteSpace: 'normal',
+    padding: '0.35em 0',
+    lineHeight: '1.45',
+  },
   '.cm-live-block--math': {
     padding: '1em 0',
     overflowX: 'auto',

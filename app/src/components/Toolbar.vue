@@ -293,20 +293,16 @@ function goMorePage(p: MorePage) {
  *  control is just "clean AI artifacts" (see the template). */
 const aiRewriteAvailable = computed(() => !IS_APP_STORE_BUILD && settings.aiEnabled);
 
-type ViewModeId = 'edit' | 'split' | 'liveEdit' | 'preview' | 'reading' | 'agent';
-/** The header's segmented switch. Split is source left, preview right;
- *  agent is the same split with the chat on the right. Reading stays in
- *  the View menu and the palette. App Store builds omit the agent segment. */
-const segModes = computed<Array<{ mode: ViewModeId; label: string }>>(() => {
-  const modes: Array<{ mode: ViewModeId; label: string }> = [
-    { mode: 'liveEdit', label: 'header.segLive' },
-    { mode: 'edit', label: 'header.segSource' },
-    { mode: 'split', label: 'header.segSplit' },
-    { mode: 'preview', label: 'header.segPreview' },
-  ];
-  if (!IS_APP_STORE_BUILD) modes.push({ mode: 'agent', label: 'header.segAgent' });
-  return modes;
-});
+type ViewModeId = 'edit' | 'split' | 'liveEdit' | 'preview' | 'reading';
+/** The header's segmented switch: 实时 / 源码 / 分栏 / 预览. Reading stays in
+ *  the View menu. Agent is a separate control — it toggles the sidebar
+ *  panel and does not change this mode. */
+const segModes = computed<Array<{ mode: ViewModeId; label: string }>>(() => [
+  { mode: 'liveEdit', label: 'header.segLive' },
+  { mode: 'edit', label: 'header.segSource' },
+  { mode: 'split', label: 'header.segSplit' },
+  { mode: 'preview', label: 'header.segPreview' },
+]);
 const segIndex = computed(() => segModes.value.findIndex((m) => m.mode === settings.viewMode));
 function pickViewMode(mode: ViewModeId) {
   closeAllDropdowns();
@@ -925,6 +921,14 @@ onBeforeUnmount(() => {
         @click="pickViewMode(m.mode)"
       >{{ t(m.label) }}</button>
     </div>
+    <button
+      v-if="!IS_APP_STORE_BUILD && isMarkdown && !settings.toolbarHidden"
+      type="button"
+      class="toolbar__agent"
+      :class="{ 'is-on': settings.showAgentPanel }"
+      :aria-pressed="settings.showAgentPanel"
+      @click="settings.toggleAgentPanel()"
+    >{{ t('header.segAgent') }}</button>
 
     <div v-if="!settings.toolbarHidden" class="toolbar__actions">
       <button
@@ -1072,6 +1076,17 @@ onBeforeUnmount(() => {
                 >
                   <span class="dropdown__check">{{ settings.viewMode === m.mode ? '✓' : '' }}</span>
                   <span class="dropdown__name">{{ t(m.label) }}</span>
+                </button>
+                <button
+                  v-if="!IS_APP_STORE_BUILD"
+                  class="dropdown__item dropdown__item--single"
+                  role="menuitemcheckbox"
+                  :aria-checked="settings.showAgentPanel"
+                  tabindex="-1"
+                  @mousedown.prevent="act(() => settings.toggleAgentPanel())"
+                >
+                  <span class="dropdown__check">{{ settings.showAgentPanel ? '✓' : '' }}</span>
+                  <span class="dropdown__name">{{ t('header.segAgent') }}</span>
                 </button>
                 <div class="dropdown__sep"></div>
               </template>
@@ -1487,7 +1502,8 @@ onBeforeUnmount(() => {
   color: var(--text);
 }
 
-/* ── Segmented 实时 / 源码 / 分栏 / 预览 / 智能体 — the thumb slides ── */
+/* ── Segmented 实时 / 源码 / 分栏 / 预览 — the thumb slides.
+   智能体 sits beside this group, not inside it. ── */
 .seg {
   position: relative;
   display: grid;
@@ -1547,8 +1563,37 @@ onBeforeUnmount(() => {
   box-shadow: var(--ring);
 }
 /* The switch needs room for every segment; below ~640px it moves into "More". */
-.toolbar--narrow .seg {
+.toolbar--narrow .seg,
+.toolbar--narrow .toolbar__agent {
   display: none;
+}
+.toolbar__agent {
+  flex-shrink: 0;
+  margin-left: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--fill-1);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 450;
+  white-space: nowrap;
+  cursor: default;
+}
+.toolbar__agent:hover {
+  color: var(--text);
+}
+.toolbar__agent.is-on {
+  color: var(--text);
+  font-weight: 560;
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.toolbar__agent:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 
 /* ── Windows title bar ─────────────────────────────────────────────────── */

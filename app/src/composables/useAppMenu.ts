@@ -57,7 +57,7 @@ export function useAppMenu() {
           types: settings.showTypesPanel,
           history: settings.showHistoryPanel,
           savedViews: settings.showViewsPanel,
-          agent: settings.viewMode === 'agent',
+          agent: settings.showAgentPanel,
         },
       },
       aiAvailable: !IS_APP_STORE_BUILD,
