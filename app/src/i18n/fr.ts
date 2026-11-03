@@ -1403,6 +1403,7 @@ export const fr: I18n = {
     neighborhood: "Voisinage",
     history: 'Historique',
     agent: 'Agent',
+    annotations: "Annotations",
   },
   inbox: {
     heading: "Boîte de réception",
@@ -2140,6 +2141,7 @@ export const fr: I18n = {
       underline: "Souligné",
       strike: "Barré",
       highlight: "Surligner",
+      annotate: "Annotate",
       code: "Code en ligne",
       link: "Lien",
       h1: "Titre 1",
@@ -2367,6 +2369,7 @@ export const fr: I18n = {
     today: "Aujourd’hui",
     inbox: "Boîte de réception",
     kanban: "Kanban",
+    annotations: "Annotations",
     inboxFilterOn: "N’afficher que les notes de la boîte de réception",
     inboxFilterOff: "Afficher tous les fichiers dans l’arborescence",
     inboxFilterActive: "Notes de la boîte de réception uniquement",
@@ -2399,6 +2402,13 @@ export const fr: I18n = {
     dropHere: "Drop here",
     hint: "Drag a card between columns. That writes status into the note.",
     moveFailed: "Couldn't update status: {error}",
+  },
+
+  annotations: {
+    heading: "Annotations",
+    empty: "This note has no highlights yet.",
+    noNote: "Open a Markdown note to list its highlights.",
+    syntax: "Select text and choose Annotate. Notes are ==text==^{note}.",
   },
 
 };

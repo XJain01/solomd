@@ -1405,6 +1405,7 @@ export const pt: I18n = {
     neighborhood: "Vizinhança",
     history: 'Histórico',
     agent: 'Agente',
+    annotations: "Annotations",
   },
   inbox: {
     heading: "Caixa de entrada",
@@ -2142,6 +2143,7 @@ export const pt: I18n = {
       underline: "Sublinhado",
       strike: "Tachado",
       highlight: "Realçar",
+      annotate: "Annotate",
       code: "Código em linha",
       link: "Link",
       h1: "Título 1",
@@ -2369,6 +2371,7 @@ export const pt: I18n = {
     today: "Hoje",
     inbox: "Caixa de entrada",
     kanban: "Kanban",
+    annotations: "Annotations",
     inboxFilterOn: "Mostrar só notas da caixa de entrada na árvore",
     inboxFilterOff: "Mostrar todos os ficheiros na árvore",
     inboxFilterActive: "Apenas notas da caixa de entrada",
@@ -2401,6 +2404,13 @@ export const pt: I18n = {
     dropHere: "Drop here",
     hint: "Drag a card between columns. That writes status into the note.",
     moveFailed: "Couldn't update status: {error}",
+  },
+
+  annotations: {
+    heading: "Annotations",
+    empty: "This note has no highlights yet.",
+    noNote: "Open a Markdown note to list its highlights.",
+    syntax: "Select text and choose Annotate. Notes are ==text==^{note}.",
   },
 
 };

@@ -62,6 +62,7 @@ import { frozenDuringComposition, isImeSafeFlushTransaction } from './cm-ime-gua
 import { tags as t } from '@lezer/highlight';
 import { isDragging, isDragEndTransaction } from './cm-drag-aware';
 import {
+  annotationNoteAt,
   findInlineHtmlSpans,
   findMarkSpans,
   maskInlineCode,
@@ -102,6 +103,7 @@ const codeMark = Decoration.mark({ class: 'cm-md-code' });
 const linkMark = Decoration.mark({ class: 'cm-md-link' });
 const htmlUnderlineMark = Decoration.mark({ class: 'cm-md-html-u' });
 const htmlMarkMark = Decoration.mark({ class: 'cm-md-html-mark' });
+const annMark = Decoration.mark({ class: 'cm-md-ann' });
 const htmlSubMark = Decoration.mark({ class: 'cm-md-html-sub' });
 const htmlSupMark = Decoration.mark({ class: 'cm-md-html-sup' });
 const htmlKbdMark = Decoration.mark({ class: 'cm-md-html-kbd' });
@@ -720,6 +722,13 @@ function buildDecorations(view: EditorView, showMarkers = false): DecorationSet 
           htmlMarkMark.range(base + span.contentFrom, base + span.contentTo),
         );
         ranges.push(tagDeco.range(base + span.closeFrom, base + span.closeTo));
+        const note = annotationNoteAt(line.text, span.closeTo);
+        if (!note) continue;
+        ranges.push(tagDeco.range(base + note.openFrom, base + note.openTo));
+        if (note.contentTo > note.contentFrom) {
+          ranges.push(annMark.range(base + note.contentFrom, base + note.contentTo));
+        }
+        ranges.push(tagDeco.range(base + note.closeFrom, base + note.closeTo));
       }
     }
   }
@@ -865,6 +874,13 @@ const liveEditTheme = EditorView.theme({
   '.cm-md-html-mark': {
     backgroundColor: 'color-mix(in srgb, var(--accent) 24%, transparent)',
     borderRadius: '2px',
+  },
+  '.cm-md-ann': {
+    fontSize: '0.8em',
+    color: 'var(--text-2)',
+    backgroundColor: 'color-mix(in srgb, var(--accent) 14%, transparent)',
+    borderRadius: '4px',
+    padding: '0 0.2em',
   },
   '.cm-md-html-sub': { fontSize: '0.75em', verticalAlign: 'sub' },
   '.cm-md-html-sup': { fontSize: '0.75em', verticalAlign: 'super' },
@@ -1060,6 +1076,7 @@ export const LIVE_EDIT_CLASSES = [
   'cm-md-strike',
   'cm-md-html-u',
   'cm-md-html-mark',
+  'cm-md-ann',
   'cm-md-html-sub',
   'cm-md-html-sup',
   'cm-md-html-kbd',

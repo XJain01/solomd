@@ -119,6 +119,36 @@ export const md = new MarkdownIt({
   .use(mark)
   .use(cjkFriendly);
 
+// `==text==^{note}` — the note is not part of markdown-it-mark. When it sits
+// directly after a highlight, render it as a small label instead of raw `^{}`.
+md.core.ruler.after('linkify', 'solomd_annotation', (state) => {
+  const Token = state.Token;
+  for (const tok of state.tokens) {
+    if (tok.type !== 'inline' || !tok.children) continue;
+    const kids = tok.children;
+    for (let i = 0; i < kids.length; i++) {
+      const cur = kids[i];
+      if (cur.type !== 'text' || !kids[i - 1] || kids[i - 1].type !== 'mark_close') continue;
+      const m = /^\^\{([^{}\n]*)\}/.exec(cur.content);
+      if (!m) continue;
+      const ann = new Token('html_inline', '', 0);
+      const comment = m[1]
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+      ann.content = `<span class="md-ann">${comment}</span>`;
+      const rest = cur.content.slice(m[0].length);
+      if (rest) {
+        cur.content = rest;
+        kids.splice(i, 0, ann);
+      } else {
+        kids.splice(i, 1, ann);
+      }
+    }
+  }
+});
+
 // #504 — Disable schemeless fuzzy domain auto-linking so stock ticker codes
 // like `00700.HK`, `600519.SH`, `000001.SZ`, or filenames like `README.md` are
 // not falsely turned into `http://00700.HK` links just because `.hk`/`.sh`/`.sz`/`.md`

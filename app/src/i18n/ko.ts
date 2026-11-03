@@ -1403,6 +1403,7 @@ export const ko: I18n = {
     neighborhood: "이웃 관계",
     history: '기록',
     agent: '에이전트',
+    annotations: "Annotations",
   },
   inbox: {
     heading: "받은 편지함",
@@ -2140,6 +2141,7 @@ export const ko: I18n = {
       underline: "밑줄",
       strike: "취소선",
       highlight: "형광펜 강조",
+      annotate: "Annotate",
       code: "인라인 코드",
       link: "링크",
       h1: "제목 1",
@@ -2367,6 +2369,7 @@ export const ko: I18n = {
     today: "오늘",
     inbox: "받은 편지함",
     kanban: "칸반",
+    annotations: "Annotations",
     inboxFilterOn: "트리에 받은 편지함 노트만 표시",
     inboxFilterOff: "트리에 모든 파일 표시",
     inboxFilterActive: "받은 편지함 노트만 표시 중",
@@ -2399,6 +2402,13 @@ export const ko: I18n = {
     dropHere: "Drop here",
     hint: "Drag a card between columns. That writes status into the note.",
     moveFailed: "Couldn't update status: {error}",
+  },
+
+  annotations: {
+    heading: "Annotations",
+    empty: "This note has no highlights yet.",
+    noNote: "Open a Markdown note to list its highlights.",
+    syntax: "Select text and choose Annotate. Notes are ==text==^{note}.",
   },
 
 };

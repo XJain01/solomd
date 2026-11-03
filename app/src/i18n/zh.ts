@@ -1401,6 +1401,7 @@ export const zh: I18n = {
     neighborhood: "关系网络",
     history: '历史',
     agent: 'AI 助手',
+    annotations: '标注',
   },
   inbox: {
     heading: '收件箱',
@@ -2144,6 +2145,7 @@ export const zh: I18n = {
       underline: "下划线",
       strike: "删除线",
       highlight: "高亮",
+      annotate: "批注",
       code: "行内代码",
       link: "链接",
       h1: "一级标题",
@@ -2371,6 +2373,7 @@ export const zh: I18n = {
     today: "今天",
     inbox: "收件箱",
     kanban: "看板",
+    annotations: "标注",
     inboxFilterOn: "文件树中只显示收件箱笔记",
     inboxFilterOff: "文件树中显示全部文件",
     inboxFilterActive: "仅显示收件箱笔记",
@@ -2403,5 +2406,11 @@ export const zh: I18n = {
     dropHere: "拖到这里",
     hint: "拖拽卡片换列，会写回笔记的 status。",
     moveFailed: "没能更新状态：{error}",
+  },
+  annotations: {
+    heading: "标注",
+    empty: "这篇笔记还没有高亮。",
+    noNote: "打开一篇 Markdown 笔记后，这里会列出其中的标注。",
+    syntax: "选中文字后点批注。写法是 ==文字==^{批注}。",
   },
 };

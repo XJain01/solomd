@@ -23,6 +23,7 @@ const NeighborhoodPanel = defineAsyncComponent(() => import('./components/Neighb
 const RelationshipsPanel = defineAsyncComponent(() => import('./components/RelationshipsPanel.vue'));
 const TagsPanel = defineAsyncComponent(() => import('./components/TagsPanel.vue'));
 const TasksPanel = defineAsyncComponent(() => import('./components/TasksPanel.vue'));
+const AnnotationsPanel = defineAsyncComponent(() => import('./components/AnnotationsPanel.vue'));
 const TableEditor = defineAsyncComponent(() => import('./components/TableEditor.vue'));
 const FormulaEditor = defineAsyncComponent(() => import('./components/FormulaEditor.vue'));
 const TypesPanel = defineAsyncComponent(() => import('./components/TypesPanel.vue'));
@@ -269,7 +270,8 @@ function ctxToggle(toggleFn: () => void) {
     !settings.showTasksPanel &&
     !showNeighborhoodPane.value &&
     !settings.showTypesPanel &&
-    !settings.showHistoryPanel;
+    !settings.showHistoryPanel &&
+    !settings.showAnnotations;
   if (noPanesVisible) {
     settings.hideRightSidebarFromPane(before);
   } else if (settings.rightSidebarHidden) {
@@ -1857,6 +1859,9 @@ const showTagsPane = computed(
 const showTasksPane = computed(
   () => settings.showTasksPanel && !!workspace.currentFolder,
 );
+const showAnnotationsPane = computed(
+  () => settings.showAnnotations && tabs.activeTab?.language === 'markdown',
+);
 // v4.6 F4 — Neighborhood relationship explorer. Markdown-only, needs a folder
 // (frontmatter wikilink groups are resolved against the workspace index).
 const showNeighborhoodPane = computed(
@@ -2057,7 +2062,8 @@ const rightSidebarHasRenderablePane = computed(
     showNeighborhoodPane.value ||
     showTypesPane.value ||
     showHistoryPane.value ||
-    showInspectorPane.value,
+    showInspectorPane.value ||
+    showAnnotationsPane.value,
 );
 
 const showRightSidebar = computed(() => {
@@ -2118,20 +2124,21 @@ const visibleRsPanes = computed(() => {
   // v4.3.0 issue #57b — order driven by settings.rsPaneOrder so users can
   // drag-reorder. Unknown ids (newly-shipped future panes) get appended at
   // the end so a SoloMD update doesn't blow away an existing user layout.
-  const all: Record<'search' | 'outline' | 'backlinks' | 'relationships' | 'tags' | 'tasks' | 'neighborhood' | 'types' | 'history' | 'inspector' | 'agent', boolean> = {
+  const all: Record<'search' | 'outline' | 'backlinks' | 'relationships' | 'tags' | 'tasks' | 'annotations' | 'neighborhood' | 'types' | 'history' | 'inspector' | 'agent', boolean> = {
     search: showSearchPane.value,
     outline: showOutlinePane.value,
     backlinks: showBacklinksPane.value,
     relationships: showRelationshipsPane.value,
     tags: showTagsPane.value,
     tasks: showTasksPane.value,
+    annotations: showAnnotationsPane.value,
     neighborhood: showNeighborhoodPane.value,
     types: showTypesPane.value,
     history: showHistoryPane.value,
     inspector: showInspectorPane.value,
     agent: false,
   };
-  const known = ['search', 'outline', 'backlinks', 'relationships', 'tags', 'tasks', 'neighborhood', 'types', 'history', 'inspector', 'agent'] as const;
+  const known = ['search', 'outline', 'backlinks', 'relationships', 'tags', 'tasks', 'annotations', 'neighborhood', 'types', 'history', 'inspector', 'agent'] as const;
   const ordered: string[] = [];
   for (const id of settings.rsPaneOrder || []) {
     if (id in all && !ordered.includes(id)) ordered.push(id);
@@ -2141,7 +2148,7 @@ const visibleRsPanes = computed(() => {
   }
   return ordered
     .filter((id) => all[id as keyof typeof all])
-    .map((id) => ({ id: id as 'search' | 'outline' | 'backlinks' | 'relationships' | 'tags' | 'tasks' | 'neighborhood' | 'types' | 'history' | 'inspector' | 'agent' }));
+    .map((id) => ({ id: id as 'search' | 'outline' | 'backlinks' | 'relationships' | 'tags' | 'tasks' | 'annotations' | 'neighborhood' | 'types' | 'history' | 'inspector' | 'agent' }));
 });
 
 // #131 — sidebar pane reordering via the ⋮⋮ grip.
@@ -2423,6 +2430,10 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
                 v-if="p.id === 'tasks'"
                 @close="ctxToggle(() => settings.toggleTasksPanel())"
               />
+              <AnnotationsPanel
+                v-if="p.id === 'annotations'"
+                @close="ctxToggle(() => settings.toggleAnnotations())"
+              />
               <NeighborhoodPanel
                 v-if="p.id === 'neighborhood'"
                 @close="ctxToggle(() => settings.toggleNeighborhood())"
@@ -2485,6 +2496,10 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
               <TasksPanel
                 v-if="p.id === 'tasks'"
                 @close="ctxToggle(() => settings.toggleTasksPanel())"
+              />
+              <AnnotationsPanel
+                v-if="p.id === 'annotations'"
+                @close="ctxToggle(() => settings.toggleAnnotations())"
               />
               <NeighborhoodPanel
                 v-if="p.id === 'neighborhood'"
@@ -2551,6 +2566,10 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
           <label class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleTasksPanel() })">
             <span class="sidebar-ctx__check">{{ settings.showTasksPanel ? '✓' : '' }}</span>
             {{ t('rsPane.tasks') }}
+          </label>
+          <label class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleAnnotations() })">
+            <span class="sidebar-ctx__check">{{ settings.showAnnotations ? '✓' : '' }}</span>
+            {{ t('rsPane.annotations') }}
           </label>
           <label class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleNeighborhood() })">
             <span class="sidebar-ctx__check">{{ settings.showNeighborhood ? '✓' : '' }}</span>

@@ -213,6 +213,8 @@ interface Settings {
   showTagsPanel: boolean;
   // Workspace-wide task panel: every `- [ ]` in the vault, grouped by file.
   showTasksPanel: boolean;
+  /** Right-sidebar list of ==highlight== / ^{note} in the open note. */
+  showAnnotations: boolean;
   // v4.6 F4: Neighborhood — per-note relationship explorer pane (frontmatter
   // wikilink groups + inverse scan + body backlinks).
   showNeighborhood: boolean;
@@ -742,6 +744,7 @@ function defaults(): Settings {
     dailyNotesTemplate: '',
     showTagsPanel: true,
     showTasksPanel: false,
+    showAnnotations: false,
     showNeighborhood: false,
     showTypesPanel: false,
     showAgentPanel: true,
@@ -1476,6 +1479,11 @@ export const useSettingsStore = defineStore('settings', {
     toggleTagsPanel() {
       this.showTagsPanel = !this.showTagsPanel;
       if (this.showTagsPanel) this.ensureRightSidebarVisible();
+      this.persist();
+    },
+    toggleAnnotations() {
+      this.showAnnotations = !this.showAnnotations;
+      if (this.showAnnotations) this.ensureRightSidebarVisible();
       this.persist();
     },
     toggleTasksPanel() {

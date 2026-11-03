@@ -1406,6 +1406,7 @@ export const sv: I18n = {
     neighborhood: "Grannskap",
     history: 'Historik',
     agent: 'Agent',
+    annotations: "Annotations",
   },
   inbox: {
     heading: 'Inkorg',
@@ -2157,6 +2158,7 @@ export const sv: I18n = {
       underline: "Understruken",
       strike: "Genomstruken",
       highlight: "Markera",
+      annotate: "Annotate",
       code: "Infogad kod",
       link: "Länk",
       h1: "Rubrik 1",
@@ -2384,6 +2386,7 @@ export const sv: I18n = {
     today: "Idag",
     inbox: "Inkorg",
     kanban: "Kanban",
+    annotations: "Annotations",
     inboxFilterOn: "Visa bara inkorgsanteckningar i trädet",
     inboxFilterOff: "Visa alla filer i trädet",
     inboxFilterActive: "Bara inkorgsanteckningar",
@@ -2416,6 +2419,13 @@ export const sv: I18n = {
     dropHere: "Drop here",
     hint: "Drag a card between columns. That writes status into the note.",
     moveFailed: "Couldn't update status: {error}",
+  },
+
+  annotations: {
+    heading: "Annotations",
+    empty: "This note has no highlights yet.",
+    noNote: "Open a Markdown note to list its highlights.",
+    syntax: "Select text and choose Annotate. Notes are ==text==^{note}.",
   },
 
 };
