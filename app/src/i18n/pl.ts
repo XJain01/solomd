@@ -2383,6 +2383,7 @@ export const pl: I18n = {
     search: "Szukaj",
     today: "Dziś",
     inbox: "Skrzynka",
+    kanban: "Kanban",
     inboxFilterOn: "Pokaż w drzewie tylko notatki ze skrzynki",
     inboxFilterOff: "Pokaż w drzewie wszystkie pliki",
     inboxFilterActive: "Tylko notatki ze skrzynki",
@@ -2403,4 +2404,18 @@ export const pl: I18n = {
     syncConflicts: "Konflikty",
     settings: "Ustawienia",
   },
+  kanban: {
+    heading: "Kanban",
+    back: "Back to editor",
+    emptyTitle: "No notes in this folder",
+    emptyBody: "Notes show up here as cards. Drag a card to another column to write its status frontmatter.",
+    unsorted: "Unsorted",
+    todo: "To do",
+    doing: "Doing",
+    done: "Done",
+    dropHere: "Drop here",
+    hint: "Drag a card between columns. That writes status into the note.",
+    moveFailed: "Couldn't update status: {error}",
+  },
+
 };

@@ -2395,6 +2395,7 @@ export const en = {
     search: "Search",
     today: "Today",
     inbox: "Inbox",
+    kanban: "Kanban",
     inboxFilterOn: "Show only inbox notes in the tree",
     inboxFilterOff: "Show all files in the tree",
     inboxFilterActive: "Showing inbox notes only",
@@ -2414,6 +2415,19 @@ export const en = {
     syncing: "Syncing…",
     syncConflicts: "Conflicts",
     settings: "Settings",
+  },
+  kanban: {
+    heading: "Kanban",
+    back: "Back to editor",
+    emptyTitle: "No notes in this folder",
+    emptyBody: "Notes show up here as cards. Drag a card to another column to write its status frontmatter.",
+    unsorted: "Unsorted",
+    todo: "To do",
+    doing: "Doing",
+    done: "Done",
+    dropHere: "Drop here",
+    hint: "Drag a card between columns. That writes status into the note.",
+    moveFailed: "Couldn't update status: {error}",
   },
 };
 

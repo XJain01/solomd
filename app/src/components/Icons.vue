@@ -227,6 +227,11 @@ defineProps<{ name: string; size?: number }>();
     <template v-else-if="name === 'inbox'">
       <path d="M4 13l2-8h12l2 8" /><path d="M4 13v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5h-5a3 3 0 0 1-6 0H4z" />
     </template>
+    <template v-else-if="name === 'kanban'">
+      <rect x="3" y="4" width="5" height="16" rx="1" />
+      <rect x="10" y="4" width="5" height="10" rx="1" />
+      <rect x="17" y="4" width="4" height="13" rx="1" />
+    </template>
     <template v-else-if="name === 'chevron-right'">
       <path d="M9 6l6 6-6 6" />
     </template>

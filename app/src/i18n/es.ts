@@ -2366,6 +2366,7 @@ export const es: I18n = {
     search: "Buscar",
     today: "Hoy",
     inbox: "Bandeja de entrada",
+    kanban: "Tablero",
     inboxFilterOn: "Mostrar solo notas de la bandeja en el árbol",
     inboxFilterOff: "Mostrar todos los archivos en el árbol",
     inboxFilterActive: "Solo notas de la bandeja",
@@ -2386,4 +2387,18 @@ export const es: I18n = {
     syncConflicts: "Conflictos",
     settings: "Ajustes",
   },
+  kanban: {
+    heading: "Tablero",
+    back: "Back to editor",
+    emptyTitle: "No notes in this folder",
+    emptyBody: "Notes show up here as cards. Drag a card to another column to write its status frontmatter.",
+    unsorted: "Unsorted",
+    todo: "To do",
+    doing: "Doing",
+    done: "Done",
+    dropHere: "Drop here",
+    hint: "Drag a card between columns. That writes status into the note.",
+    moveFailed: "Couldn't update status: {error}",
+  },
+
 };

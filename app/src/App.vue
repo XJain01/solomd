@@ -39,6 +39,8 @@ const BasesView = defineAsyncComponent(() => import('./components/BasesView.vue'
 import { BASES_OPEN_EVENT, BASES_CLOSE_EVENT } from './composables/useBasesView';
 const InboxView = defineAsyncComponent(() => import('./components/InboxView.vue'));
 import { INBOX_OPEN_EVENT, INBOX_CLOSE_EVENT } from './composables/useInboxView';
+const KanbanView = defineAsyncComponent(() => import('./components/KanbanView.vue'));
+import { KANBAN_OPEN_EVENT, KANBAN_CLOSE_EVENT } from './composables/useKanbanView';
 // v4.6.1 F2 — Type lens (center-pane filtered view of one type's members).
 const TypeLensView = defineAsyncComponent(() => import('./components/TypeLensView.vue'));
 import { TYPE_LENS_OPEN_EVENT, TYPE_LENS_CLOSE_EVENT } from './composables/useTypeLens';
@@ -1660,10 +1662,18 @@ function onAIRewriteAccept(e: Event) {
 function onAIRewriteCancel() {
   // No-op for now; AIRewriteOverlay self-closes.
 }
-function onOpenBases() { basesOpen.value = true; viewOpen.value = false; typeLensOpen.value = false; }
+function onOpenBases() { basesOpen.value = true; viewOpen.value = false; typeLensOpen.value = false; kanbanOpen.value = false; }
 function onCloseBases() { basesOpen.value = false; }
-function onOpenInbox() { inboxViewOpen.value = true; typeLensOpen.value = false; }
+function onOpenInbox() { inboxViewOpen.value = true; kanbanOpen.value = false; typeLensOpen.value = false; }
 function onCloseInbox() { inboxViewOpen.value = false; }
+function onOpenKanban() {
+  kanbanOpen.value = true;
+  inboxViewOpen.value = false;
+  basesOpen.value = false;
+  typeLensOpen.value = false;
+  viewOpen.value = false;
+}
+function onCloseKanban() { kanbanOpen.value = false; }
 // v4.6.1 F2 — type lens content swap. Mutually exclusive with the other
 // center-pane overlays (mirrors basesOpen / inboxViewOpen). The open event
 // carries which type to focus; we pass it down as a prop so the view is
@@ -1675,11 +1685,12 @@ function onOpenTypeLens(e: Event) {
   typeLensOpen.value = true;
   basesOpen.value = false;
   inboxViewOpen.value = false;
+  kanbanOpen.value = false;
   viewOpen.value = false;
 }
 function onCloseTypeLens() { typeLensOpen.value = false; }
 // v4.6 F5 — saved-view content swap.
-function onOpenView() { viewOpen.value = true; basesOpen.value = false; typeLensOpen.value = false; }
+function onOpenView() { viewOpen.value = true; basesOpen.value = false; typeLensOpen.value = false; kanbanOpen.value = false; }
 function onCloseView() { viewOpen.value = false; }
 
 async function onWikiOpen(e: Event) {
@@ -1752,6 +1763,7 @@ function onOpenAgentWizard() {
 
 function onLeaveCenterOverlay() {
   if (inboxViewOpen.value) inboxViewOpen.value = false;
+  if (kanbanOpen.value) kanbanOpen.value = false;
   if (basesOpen.value) basesOpen.value = false;
   if (typeLensOpen.value) typeLensOpen.value = false;
   if (viewOpen.value) viewOpen.value = false;
@@ -1764,6 +1776,8 @@ window.addEventListener(BASES_OPEN_EVENT, onOpenBases as EventListener);
 window.addEventListener(BASES_CLOSE_EVENT, onCloseBases as EventListener);
 window.addEventListener(INBOX_OPEN_EVENT, onOpenInbox as EventListener);
 window.addEventListener(INBOX_CLOSE_EVENT, onCloseInbox as EventListener);
+window.addEventListener(KANBAN_OPEN_EVENT, onOpenKanban as EventListener);
+window.addEventListener(KANBAN_CLOSE_EVENT, onCloseKanban as EventListener);
 window.addEventListener(TYPE_LENS_OPEN_EVENT, onOpenTypeLens as EventListener);
 window.addEventListener(TYPE_LENS_CLOSE_EVENT, onCloseTypeLens as EventListener);
 window.addEventListener(VIEW_OPEN_EVENT, onOpenView as EventListener);
@@ -1797,6 +1811,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('solomd:leave-center-overlay', onLeaveCenterOverlay);
   window.removeEventListener(INBOX_OPEN_EVENT, onOpenInbox as EventListener);
   window.removeEventListener(INBOX_CLOSE_EVENT, onCloseInbox as EventListener);
+  window.removeEventListener(KANBAN_OPEN_EVENT, onOpenKanban as EventListener);
+  window.removeEventListener(KANBAN_CLOSE_EVENT, onCloseKanban as EventListener);
   window.removeEventListener(TYPE_LENS_OPEN_EVENT, onOpenTypeLens as EventListener);
   window.removeEventListener(TYPE_LENS_CLOSE_EVENT, onCloseTypeLens as EventListener);
   window.removeEventListener(VIEW_OPEN_EVENT, onOpenView as EventListener);
@@ -2013,6 +2029,7 @@ watch(
   (v) => {
     if (v !== 'home') return;
     inboxViewOpen.value = false;
+    kanbanOpen.value = false;
     basesOpen.value = false;
     typeLensOpen.value = false;
   },
@@ -2250,6 +2267,7 @@ function onSidebarResize(side: 'left' | 'right', ev: MouseEvent) {
 }
 const basesOpen = ref(false);
 const inboxViewOpen = ref(false);
+const kanbanOpen = ref(false);
 // v4.6.1 F2 — type lens (full-pane filtered list of one type's members).
 const typeLensOpen = ref(false);
 const typeLensName = ref('');
@@ -2421,10 +2439,11 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
         <div class="content">
           <BasesView v-if="basesOpen" />
           <InboxView v-else-if="inboxViewOpen" />
+          <KanbanView v-else-if="kanbanOpen" />
           <TypeLensView v-else-if="typeLensOpen" :type-name="typeLensName" />
           <ViewNoteList v-else-if="viewPaneVisible" />
           <TileRoot v-else :node="tiles.root" @cursor="onCursor" @selection="onSelection" />
-          <StatsPill v-if="!basesOpen && !inboxViewOpen && !typeLensOpen && !viewPaneVisible" :line="cursorLine" :col="cursorCol" :selection-text="selectionText" />
+          <StatsPill v-if="!basesOpen && !inboxViewOpen && !kanbanOpen && !typeLensOpen && !viewPaneVisible" :line="cursorLine" :col="cursorCol" :selection-text="selectionText" />
         </div>
         <aside
           v-if="showRightSidebar && settings.outlineSide !== 'left'"

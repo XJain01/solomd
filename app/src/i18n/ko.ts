@@ -2366,6 +2366,7 @@ export const ko: I18n = {
     search: "검색",
     today: "오늘",
     inbox: "받은 편지함",
+    kanban: "칸반",
     inboxFilterOn: "트리에 받은 편지함 노트만 표시",
     inboxFilterOff: "트리에 모든 파일 표시",
     inboxFilterActive: "받은 편지함 노트만 표시 중",
@@ -2386,4 +2387,18 @@ export const ko: I18n = {
     syncConflicts: "충돌",
     settings: "설정",
   },
+  kanban: {
+    heading: "칸반",
+    back: "Back to editor",
+    emptyTitle: "No notes in this folder",
+    emptyBody: "Notes show up here as cards. Drag a card to another column to write its status frontmatter.",
+    unsorted: "Unsorted",
+    todo: "To do",
+    doing: "Doing",
+    done: "Done",
+    dropHere: "Drop here",
+    hint: "Drag a card between columns. That writes status into the note.",
+    moveFailed: "Couldn't update status: {error}",
+  },
+
 };

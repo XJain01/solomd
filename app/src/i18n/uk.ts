@@ -2383,6 +2383,7 @@ export const uk: I18n = {
     search: "Пошук",
     today: "Сьогодні",
     inbox: "Вхідні",
+    kanban: "Канбан",
     inboxFilterOn: "Показувати в дереві лише вхідні нотатки",
     inboxFilterOff: "Показувати в дереві всі файли",
     inboxFilterActive: "Лише вхідні нотатки",
@@ -2403,4 +2404,18 @@ export const uk: I18n = {
     syncConflicts: "Конфлікти",
     settings: "Налаштування",
   },
+  kanban: {
+    heading: "Канбан",
+    back: "Back to editor",
+    emptyTitle: "No notes in this folder",
+    emptyBody: "Notes show up here as cards. Drag a card to another column to write its status frontmatter.",
+    unsorted: "Unsorted",
+    todo: "To do",
+    doing: "Doing",
+    done: "Done",
+    dropHere: "Drop here",
+    hint: "Drag a card between columns. That writes status into the note.",
+    moveFailed: "Couldn't update status: {error}",
+  },
+
 };

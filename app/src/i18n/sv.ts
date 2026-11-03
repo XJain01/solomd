@@ -2383,6 +2383,7 @@ export const sv: I18n = {
     search: "Sök",
     today: "Idag",
     inbox: "Inkorg",
+    kanban: "Kanban",
     inboxFilterOn: "Visa bara inkorgsanteckningar i trädet",
     inboxFilterOff: "Visa alla filer i trädet",
     inboxFilterActive: "Bara inkorgsanteckningar",
@@ -2403,4 +2404,18 @@ export const sv: I18n = {
     syncConflicts: "Konflikter",
     settings: "Inställningar",
   },
+  kanban: {
+    heading: "Kanban",
+    back: "Back to editor",
+    emptyTitle: "No notes in this folder",
+    emptyBody: "Notes show up here as cards. Drag a card to another column to write its status frontmatter.",
+    unsorted: "Unsorted",
+    todo: "To do",
+    doing: "Doing",
+    done: "Done",
+    dropHere: "Drop here",
+    hint: "Drag a card between columns. That writes status into the note.",
+    moveFailed: "Couldn't update status: {error}",
+  },
+
 };

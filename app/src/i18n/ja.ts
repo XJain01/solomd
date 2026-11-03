@@ -2366,6 +2366,7 @@ export const ja: I18n = {
     search: "検索",
     today: "今日",
     inbox: "受信箱",
+    kanban: "カンバン",
     inboxFilterOn: "ツリーに受信箱のノートだけを表示",
     inboxFilterOff: "ツリーにすべてのファイルを表示",
     inboxFilterActive: "受信箱のノートのみ表示中",
@@ -2386,4 +2387,18 @@ export const ja: I18n = {
     syncConflicts: "競合あり",
     settings: "設定",
   },
+  kanban: {
+    heading: "カンバン",
+    back: "Back to editor",
+    emptyTitle: "No notes in this folder",
+    emptyBody: "Notes show up here as cards. Drag a card to another column to write its status frontmatter.",
+    unsorted: "Unsorted",
+    todo: "To do",
+    doing: "Doing",
+    done: "Done",
+    dropHere: "Drop here",
+    hint: "Drag a card between columns. That writes status into the note.",
+    moveFailed: "Couldn't update status: {error}",
+  },
+
 };

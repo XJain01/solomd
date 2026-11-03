@@ -2383,6 +2383,7 @@ export const tr: I18n = {
     search: "Ara",
     today: "Bugün",
     inbox: "Gelen kutusu",
+    kanban: "Kanban",
     inboxFilterOn: "Ağaçta yalnızca gelen kutusu notlarını göster",
     inboxFilterOff: "Ağaçta tüm dosyaları göster",
     inboxFilterActive: "Yalnızca gelen kutusu notları",
@@ -2403,4 +2404,18 @@ export const tr: I18n = {
     syncConflicts: "Çakışmalar",
     settings: "Ayarlar",
   },
+  kanban: {
+    heading: "Kanban",
+    back: "Back to editor",
+    emptyTitle: "No notes in this folder",
+    emptyBody: "Notes show up here as cards. Drag a card to another column to write its status frontmatter.",
+    unsorted: "Unsorted",
+    todo: "To do",
+    doing: "Doing",
+    done: "Done",
+    dropHere: "Drop here",
+    hint: "Drag a card between columns. That writes status into the note.",
+    moveFailed: "Couldn't update status: {error}",
+  },
+
 };

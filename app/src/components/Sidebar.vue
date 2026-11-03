@@ -26,6 +26,7 @@ import { useTabsStore } from '../stores/tabs';
 import { useFiles } from '../composables/useFiles';
 import { useInbox } from '../composables/useInbox';
 import { useInboxView } from '../composables/useInboxView';
+import { useKanbanView } from '../composables/useKanbanView';
 import { useDailyNotes } from '../composables/useDailyNotes';
 import { shortcutLabel } from '../lib/keybindings';
 import { isMobile, usesCommandKey } from '../lib/platform';
@@ -55,6 +56,7 @@ const tabs = useTabsStore();
 const files = useFiles();
 const inbox = useInbox();
 const inboxView = useInboxView();
+const kanbanView = useKanbanView();
 const daily = useDailyNotes();
 const { t } = useI18n();
 
@@ -78,6 +80,9 @@ function openToday() {
 }
 function openInbox() {
   inboxView.openInbox();
+}
+function openKanban() {
+  kanbanView.openKanban();
 }
 const inboxFiltering = computed(() => inbox.filterMode.value);
 
@@ -279,6 +284,11 @@ onBeforeUnmount(() => {
           <span class="sb__card-label">{{ t('sidebar.inbox') }}</span>
           <span class="sb__card-sub">{{ t('phone.count', { n: inbox.inboxCount.value }) }}</span>
         </button>
+        <button v-if="hasFolder" class="sb__card" type="button" @click="openKanban">
+          <Icon name="kanban" :size="20" class="sb__card-icon" />
+          <span class="sb__card-label">{{ t('sidebar.kanban') }}</span>
+          <span class="sb__card-sub">{{ t('kanban.heading') }}</span>
+        </button>
         <button class="sb__card" type="button" aria-haspopup="menu" :aria-expanded="recentOpen" @click.stop="toggleRecent">
           <Icon name="recent" :size="20" class="sb__card-icon" />
           <span class="sb__card-label">{{ t('sidebar.recent') }}</span>
@@ -316,6 +326,10 @@ onBeforeUnmount(() => {
           </button>
           <span v-if="inbox.inboxCount.value > 0" class="sb__count">{{ inbox.inboxCount.value }}</span>
         </div>
+        <button v-if="hasFolder" class="sb__row" type="button" @click="openKanban">
+          <Icon name="kanban" :size="16" class="sb__row-icon" />
+          <span class="sb__row-label">{{ t('sidebar.kanban') }}</span>
+        </button>
         <button
           class="sb__row"
           :class="{ 'sb__row--open': recentOpen }"

@@ -2383,6 +2383,7 @@ export const nl: I18n = {
     search: "Zoeken",
     today: "Vandaag",
     inbox: "Inbox",
+    kanban: "Kanban",
     inboxFilterOn: "Toon alleen inboxnotities in de boom",
     inboxFilterOff: "Toon alle bestanden in de boom",
     inboxFilterActive: "Alleen inboxnotities",
@@ -2403,4 +2404,18 @@ export const nl: I18n = {
     syncConflicts: "Conflicten",
     settings: "Instellingen",
   },
+  kanban: {
+    heading: "Kanban",
+    back: "Back to editor",
+    emptyTitle: "No notes in this folder",
+    emptyBody: "Notes show up here as cards. Drag a card to another column to write its status frontmatter.",
+    unsorted: "Unsorted",
+    todo: "To do",
+    doing: "Doing",
+    done: "Done",
+    dropHere: "Drop here",
+    hint: "Drag a card between columns. That writes status into the note.",
+    moveFailed: "Couldn't update status: {error}",
+  },
+
 };
