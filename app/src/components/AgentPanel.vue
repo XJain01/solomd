@@ -692,10 +692,20 @@ watch(stateKey, (k) => {
 .agent-panel__empty p {
   margin: 0;
 }
+/* The body (empty prompt or the thread) takes every pixel between the
+   header and the composer, so the input stays on the bottom edge. */
+.agent-panel__empty {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
 
 /* --- Messages ------------------------------------------------------------ */
 .agent-panel__messages {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
   list-style: none;
