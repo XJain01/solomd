@@ -129,12 +129,14 @@ jobs:
 
             ### What's new / 更新内容
 
-            Fork release, distinct from upstream 5.0.12:
+            Fork release on top of v5.1.0 (upstream is at 5.0.13):
 
-            - **Agent view** in the header, with the chat in a split pane beside the note
-            - **Kanban** under Inbox — columns come from note status frontmatter, and dragging a card writes that status back
-            - **tldraw** whiteboard interaction no longer jumps the page or loses scroll
-            - **Obsidian Callouts** — `> [!note]` (and the other built-in types), including a custom title and foldable `[!note]+` / `[!note]-`
+            - **Obsidian Callouts** refined — lines stay contiguous when the source has no blank lines, the title is a full-width tint band, and each type gets its own icon (`info` is the circled `i`, not a text glyph)
+            - **智能体 / Agent** is now its own toggle next to the 实时 / 源码 / 分栏 / 预览 switch: opening the chat no longer changes the view mode, and switching modes no longer clears it
+            - **Kanban** is a local task board — multiple projects, editable columns, tasks with optional notes, stored in `localStorage` (`solomd.kanban.v1`). This replaces v5.1.0's frontmatter-driven board, so dragging a card no longer writes note status back
+            - Draft character count sits immediately left of 发送 and grows leftward instead of over the button
+
+            Also in this build: the bundled `solomd-mcp` and its `.mcpb` manifest report the app version again (they had drifted to 5.0.13), and the fork is merged with upstream `main` through v5.0.13.
 
             https://solomd.app/whats-new · [中文](https://solomd.app/zh/whats-new)
 
