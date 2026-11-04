@@ -4279,6 +4279,10 @@ function richExtensionsFor(tab: Tab) {
         liveBlocksExtension({
           getImageRoot: () => extractImageRoot(tab.content || ''),
           getFilePath: () => tab.filePath,
+          getFrontmatterStrings: () => ({
+            title: t('frontmatterCard.title'),
+            source: t('frontmatterCard.source'),
+          }),
           // F7 — live tldraw whiteboard theme + writeback.
           getBoardTheme: () => ({
             colorScheme: settings.theme === 'dark' ? 'dark' : 'light',

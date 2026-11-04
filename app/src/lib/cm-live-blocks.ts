@@ -21,6 +21,7 @@
 import { RangeSetBuilder, StateField, StateEffect, Prec, EditorSelection, Transaction, EditorState } from '@codemirror/state';
 import { keymap } from '@codemirror/view';
 import type { DecorationSet } from '@codemirror/view';
+import yaml from 'js-yaml';
 import { syntaxTree } from '@codemirror/language';
 import { isDragging, isDragEndTransaction } from './cm-drag-aware';
 import { frozenFieldDuringComposition, isImeSafeFlushTransaction } from './cm-ime-guard';
@@ -1116,6 +1117,147 @@ interface BlockOptions {
    * are unaffected — they never reveal source anyway.
    */
   keepSource?: () => boolean;
+  /** Localized chrome for the collapsible frontmatter card. */
+  getFrontmatterStrings?: () => { title: string; source: string };
+}
+
+interface FrontmatterStrings {
+  title: string;
+  source: string;
+}
+
+/** Shared across widgets so collapsing one note keeps the card collapsed
+ *  when CodeMirror re-renders it. */
+let frontmatterCollapsed = false;
+
+/** 1-based line number of the closing `---`, or null when the doc has no
+ *  complete frontmatter block. */
+function frontmatterEndLine(lines: string[]): number | null {
+  if (lines[0]?.replace(/^\uFEFF/, '').trim() !== '---') return null;
+  for (let i = 1; i < lines.length; i += 1) {
+    if (lines[i].trim() === '---') return i + 1;
+  }
+  return null;
+}
+
+function frontmatterValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  // js-yaml turns ISO timestamps into Date; JSON.stringify would wrap them in
+  // quotes. Show them the way they are written in the file instead.
+  if (value instanceof Date) {
+    return value.toISOString().replace(/\.000Z$/, 'Z');
+  }
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+/** Obsidian-style collapsible properties card for the YAML frontmatter. */
+class FrontmatterWidget extends WidgetType {
+  private readonly raw: string;
+  private readonly strings: FrontmatterStrings;
+
+  // Plain field assignments, not TS parameter properties: node --test strips
+  // types only and rejects parameter-property syntax (see ImageWidget).
+  constructor(raw: string, strings: FrontmatterStrings) {
+    super();
+    this.raw = raw;
+    this.strings = strings;
+  }
+
+  eq(other: FrontmatterWidget): boolean {
+    return (
+      other.raw === this.raw &&
+      other.strings.title === this.strings.title &&
+      other.strings.source === this.strings.source
+    );
+  }
+
+  ignoreEvent(event: Event): boolean {
+    const target = event.target as HTMLElement | null;
+    return !target?.closest('.cm-frontmatter-card');
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'cm-live-block cm-frontmatter-card';
+    if (frontmatterCollapsed) wrap.classList.add('cm-frontmatter-card--collapsed');
+
+    const head = document.createElement('div');
+    head.className = 'cm-frontmatter-head';
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'cm-frontmatter-toggle';
+    toggle.setAttribute('aria-expanded', String(!frontmatterCollapsed));
+    const chevron = document.createElement('span');
+    chevron.className = 'cm-frontmatter-chevron';
+    chevron.textContent = '▾';
+    const title = document.createElement('span');
+    title.textContent = this.strings.title;
+    toggle.append(chevron, title);
+    toggle.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      frontmatterCollapsed = !frontmatterCollapsed;
+      wrap.classList.toggle('cm-frontmatter-card--collapsed', frontmatterCollapsed);
+      toggle.setAttribute('aria-expanded', String(!frontmatterCollapsed));
+    });
+    head.appendChild(toggle);
+
+    const source = document.createElement('button');
+    source.type = 'button';
+    source.className = 'cm-frontmatter-source';
+    source.textContent = this.strings.source;
+    // Moving the caret into the block is what reveals the raw YAML: the
+    // block decoration is dropped on the next selection change.
+    source.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      view.dispatch({ selection: { anchor: 0 } });
+      view.focus();
+    });
+    head.appendChild(source);
+    wrap.appendChild(head);
+
+    const body = document.createElement('div');
+    body.className = 'cm-frontmatter-body';
+    const rawBody = this.raw
+      .replace(/^\uFEFF?---\r?\n/, '')
+      .replace(/\r?\n---\s*$/, '');
+    let parsed: Record<string, unknown> | null = null;
+    try {
+      const value = yaml.load(rawBody);
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        parsed = value as Record<string, unknown>;
+      }
+    } catch {
+      parsed = null;
+    }
+
+    if (parsed && Object.keys(parsed).length > 0) {
+      const dl = document.createElement('dl');
+      for (const [key, value] of Object.entries(parsed)) {
+        const dt = document.createElement('dt');
+        dt.textContent = key;
+        const dd = document.createElement('dd');
+        dd.textContent = frontmatterValue(value);
+        dl.append(dt, dd);
+      }
+      body.appendChild(dl);
+    } else {
+      const pre = document.createElement('pre');
+      pre.textContent = rawBody;
+      body.appendChild(pre);
+    }
+    wrap.appendChild(body);
+    return wrap;
+  }
 }
 
 function buildBlockDecorations(state: EditorState, opts: BlockOptions): DecorationSet {
@@ -1163,6 +1305,31 @@ function buildBlockDecorations(state: EditorState, opts: BlockOptions): Decorati
         });
         const imageRefs = extractImageReferenceDefinitions(sourceLines, fenceBody);
         let i = 1;
+
+        // Collapsible YAML properties card (Obsidian-style). The block is
+        // replaced only while the caret is outside it; entering the block or
+        // clicking "source" reveals the raw lines to edit.
+        const fmEnd = frontmatterEndLine(sourceLines);
+        if (fmEnd !== null) {
+          const cursorInside =
+            keepSource || cursorLine <= fmEnd || cursorLineEnd <= fmEnd;
+          if (!cursorInside) {
+            const blockTo = doc.line(fmEnd).to;
+            builder.add(
+              0,
+              blockTo,
+              Decoration.replace({
+                widget: new FrontmatterWidget(
+                  doc.sliceString(0, blockTo),
+                  opts.getFrontmatterStrings?.() ?? { title: '属性', source: '源码' },
+                ),
+                block: true,
+              }),
+            );
+          }
+          i = fmEnd + 1;
+        }
+
         while (i <= lastLine) {
           const line = doc.line(i);
 
@@ -1860,6 +2027,78 @@ export const liveBlocksTheme = EditorView.theme({
     whiteSpace: 'normal',
     padding: '0.35em 0',
     lineHeight: '1.45',
+  },
+  // Obsidian-style collapsible frontmatter card in live edit.
+  '.cm-frontmatter-card': {
+    borderLeft: '3px solid var(--accent)',
+    background: 'var(--bg-hover)',
+    borderRadius: '0 6px 6px 0',
+    padding: '0.4em 0.8em',
+    fontFamily: 'var(--font-ui, inherit)',
+  },
+  '.cm-frontmatter-head': {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  '.cm-frontmatter-toggle': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    padding: '0',
+    border: '0',
+    background: 'transparent',
+    color: 'var(--text-muted)',
+    font: 'inherit',
+    fontWeight: '600',
+    cursor: 'pointer',
+  },
+  '.cm-frontmatter-chevron': {
+    display: 'inline-block',
+    transition: 'transform 120ms ease',
+  },
+  '.cm-frontmatter-card--collapsed .cm-frontmatter-chevron': {
+    transform: 'rotate(-90deg)',
+  },
+  '.cm-frontmatter-card--collapsed .cm-frontmatter-body': {
+    display: 'none',
+  },
+  '.cm-frontmatter-source': {
+    marginLeft: 'auto',
+    padding: '0',
+    border: '0',
+    background: 'transparent',
+    color: 'var(--text-3)',
+    font: 'inherit',
+    fontSize: '0.8em',
+    cursor: 'pointer',
+  },
+  '.cm-frontmatter-body': {
+    marginTop: '0.3em',
+  },
+  '.cm-frontmatter-body dl': {
+    display: 'grid',
+    gridTemplateColumns: 'max-content 1fr',
+    columnGap: '0.9rem',
+    rowGap: '0.2rem',
+    margin: '0',
+  },
+  '.cm-frontmatter-body dt': {
+    fontWeight: '600',
+    color: 'var(--text-muted)',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '0.85em',
+  },
+  '.cm-frontmatter-body dd': {
+    margin: '0',
+    color: 'var(--text)',
+    overflowWrap: 'anywhere',
+  },
+  '.cm-frontmatter-body pre': {
+    margin: '0',
+    whiteSpace: 'pre-wrap',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '0.85em',
   },
   '.cm-live-block--math': {
     padding: '1em 0',

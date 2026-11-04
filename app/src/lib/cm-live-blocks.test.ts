@@ -316,3 +316,50 @@ test('liveBlocksExtension stays frozen while dragging and flushes on dragEndEffe
   state = state.update({ effects: dragEndEffect.of(null) }).state;
   assert.equal(countImageWidgets(state), 0);
 });
+
+// --- Collapsible YAML frontmatter card (Obsidian-style properties) ---------
+
+const frontmatterDoc = ['---', 'title: Hi', 'inbox: true', '---', '', 'body'].join('\n');
+
+test('frontmatter collapses to FrontmatterWidget while the caret is outside it', () => {
+  const hits = widgets(frontmatterDoc, 6).filter((w) => w.widgetName === 'FrontmatterWidget');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].from, 0);
+  // Replaces through the closing `---` (line 4), not the blank line after it.
+  assert.equal(lineOf(frontmatterDoc, hits[0].to), 4);
+});
+
+test('frontmatter source stays visible while the caret is inside the block', () => {
+  for (const line of [1, 2, 4]) {
+    const hits = widgets(frontmatterDoc, line).filter(
+      (w) => w.widgetName === 'FrontmatterWidget',
+    );
+    assert.deepEqual(hits, [], `caret on line ${line} should reveal the source`);
+  }
+});
+
+test('an unclosed `---` block is not replaced', () => {
+  const doc = ['---', 'title: Hi', '', 'body'].join('\n');
+  const hits = widgets(doc, 4).filter((w) => w.widgetName === 'FrontmatterWidget');
+  assert.deepEqual(hits, []);
+});
+
+test('keepSource leaves the frontmatter as source', () => {
+  const doc = frontmatterDoc;
+  const state = EditorState.create({
+    doc,
+    extensions: [
+      markdown({ base: markdownLanguage, addKeymap: false }),
+      liveBlocksExtension({ keepSource: () => true }),
+    ],
+    selection: { anchor: doc.length },
+  });
+  const found: string[] = [];
+  for (const set of state.facet(EditorView.decorations)) {
+    set.between(0, doc.length, (_from, _to, deco) => {
+      const w = (deco.spec as { widget?: { constructor: { name: string } } }).widget;
+      if (w) found.push(w.constructor.name);
+    });
+  }
+  assert.ok(!found.includes('FrontmatterWidget'), `unexpected widgets: ${JSON.stringify(found)}`);
+});

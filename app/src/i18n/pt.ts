@@ -2451,6 +2451,11 @@ export const pt: I18n = {
     colDone: "Done",
   },
 
+  frontmatterCard: {
+    title: 'Properties',
+    source: 'Source',
+  },
+
   drawing: {
     heading: 'Drawing board',
     back: 'Back to editor',

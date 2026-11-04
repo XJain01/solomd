@@ -2453,6 +2453,11 @@ export const zh: I18n = {
     colDone: "完成",
   },
 
+  frontmatterCard: {
+    title: "属性",
+    source: "源码",
+  },
+
   drawing: {
     heading: "手绘画板",
     back: "返回编辑器",
