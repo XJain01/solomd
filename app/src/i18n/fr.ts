@@ -1943,7 +1943,7 @@ export const fr: I18n = {
     allowWriteHint:
       'Désactivé par défaut. Une fois activé, l\'agent peut appeler write_note / append_to_note depuis le chat. Les outils en lecture seule (list, read, search, backlinks, tags, outline, autogit log/diff) fonctionnent dans tous les cas.',
     loopCap: 'Limite de boucle d\'outils',
-    loopCapHint: 'Aller-retours LLM ↔ outil maximum par tour de chat (1–20). Défaut 8.',
+    loopCapHint: 'Aller-retours LLM ↔ outil maximum par tour de chat (1–20). Défaut 20.',
     recentRuns: 'Exécutions récentes',
     noWorkspace: 'Ouvrir un dossier pour voir les exécutions d\'agent de ce workspace.',
     loading: 'Chargement…',
@@ -1951,6 +1951,7 @@ export const fr: I18n = {
     refresh: 'Actualiser',
   },
   agent: {
+    toolsUsed: 'Tools × {n}',
     heading: 'Agent',
     empty: {
       noFolder: 'Ouvrir un dossier pour discuter avec votre vault.',

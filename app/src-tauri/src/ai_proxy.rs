@@ -570,6 +570,22 @@ pub async fn ai_verify_key(
     }
 }
 
+/// Closing text when the tool-loop budget runs out. Both loops force one
+/// text-only summary turn first; this notice makes the limit visible instead
+/// of ending with a pile of tool cards and an empty assistant bubble.
+fn tool_cap_notice(cap: u32, summary: &str) -> String {
+    let tail = format!(
+        "_Tool-call limit reached ({cap}). Reply “continue” to keep going._\n\n\
+         已达到工具调用上限（{cap} 轮）。回复“继续”可以接着做。"
+    );
+    let body = summary.trim();
+    if body.is_empty() {
+        tail
+    } else {
+        format!("{body}\n\n---\n{tail}")
+    }
+}
+
 fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()
@@ -1788,7 +1804,7 @@ pub async fn run_chat_anthropic_loop(
     cancel: Arc<AtomicBool>,
     run_handle: Option<Arc<RunHandle>>,
 ) -> Result<(String, u64, u64), String> {
-    let cap = req.tool_loop_cap.unwrap_or(8).max(1).min(20);
+    let cap = req.tool_loop_cap.unwrap_or(20).max(1).min(20);
     let workspace = workspace_from_req(req);
     // Accumulate run-level token totals across each turn. Anthropic
     // resets `usage` per request, so summing per-turn is the right move.
@@ -1883,8 +1899,35 @@ pub async fn run_chat_anthropic_loop(
 
         // Hit cap on the *previous* iteration check — safe since cap >= 1.
         if iter + 1 >= cap {
-            // Treat as final turn even though the model wanted to call a tool.
-            return Ok((last_text, tokens_in_total, tokens_out_total));
+            // Same rule as the OpenAI loop: never end on a tool-only turn.
+            // Ask for a text summary with tools switched off.
+            history.push(serde_json::json!({
+                "role": "user",
+                "content": "Tool budget exhausted. Do not call any more tools. Summarize what you found so far and what still remains, in plain text."
+            }));
+            let no_tools = serde_json::json!([]);
+            let summary = anthropic_one_turn(
+                app,
+                request_id,
+                req,
+                api_key,
+                &system_str,
+                &history,
+                &no_tools,
+                cancel.clone(),
+            )
+            .await;
+            let (text, tin, tout) = match summary {
+                Ok(outcome) => (outcome.text, outcome.tokens_in, outcome.tokens_out),
+                Err(e) => (format!("(summary request failed: {e})"), 0, 0),
+            };
+            tokens_in_total = tokens_in_total.saturating_add(tin);
+            tokens_out_total = tokens_out_total.saturating_add(tout);
+            return Ok((
+                tool_cap_notice(cap, &text),
+                tokens_in_total,
+                tokens_out_total,
+            ));
         }
 
         // Append the assistant message verbatim (text + tool_use blocks).
@@ -2245,7 +2288,7 @@ pub async fn run_chat_openai_loop(
     cancel: Arc<AtomicBool>,
     run_handle: Option<Arc<RunHandle>>,
 ) -> Result<(String, u64, u64), String> {
-    let cap = req.tool_loop_cap.unwrap_or(8).max(1).min(20);
+    let cap = req.tool_loop_cap.unwrap_or(20).max(1).min(20);
     let workspace = workspace_from_req(req);
     // Run-level token totals — OpenAI Chat Completions resets `usage`
     // per request, so a per-turn sum is the right accounting.
@@ -2321,7 +2364,37 @@ pub async fn run_chat_openai_loop(
             return Ok((last_text, tokens_in_total, tokens_out_total));
         }
         if iter + 1 >= cap {
-            return Ok((last_text, tokens_in_total, tokens_out_total));
+            // Budget exhausted while the model still wants tools. Returning
+            // here with `last_text` (usually empty — every turn was a tool
+            // call) is what produced the "wall of tools, no answer" runs.
+            // Force one text-only wrap-up with tools switched off so the
+            // panel always ends with something readable.
+            history.push(serde_json::json!({
+                "role": "user",
+                "content": "Tool budget exhausted. Do not call any more tools. Summarize what you found so far and what still remains, in plain text."
+            }));
+            let no_tools = serde_json::json!([]);
+            let summary = openai_one_turn(
+                Some(app),
+                request_id,
+                req,
+                api_key,
+                &history,
+                &no_tools,
+                cancel.clone(),
+            )
+            .await;
+            let (text, tin, tout) = match summary {
+                Ok(outcome) => (outcome.text, outcome.tokens_in, outcome.tokens_out),
+                Err(e) => (format!("(summary request failed: {e})"), 0, 0),
+            };
+            tokens_in_total = tokens_in_total.saturating_add(tin);
+            tokens_out_total = tokens_out_total.saturating_add(tout);
+            return Ok((
+                tool_cap_notice(cap, &text),
+                tokens_in_total,
+                tokens_out_total,
+            ));
         }
 
         // Append assistant message with tool_calls. content may be empty.

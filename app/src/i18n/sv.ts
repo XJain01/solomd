@@ -1958,7 +1958,7 @@ export const sv: I18n = {
     allowWriteHint:
       'Av som standard. När påslagen kan agenten anropa write_note / append_to_note från chatten. Skrivskyddade verktyg (list, read, search, backlinks, tags, outline, autogit log/diff) fungerar oavsett.',
     loopCap: 'Tak för verktygsloop',
-    loopCapHint: 'Max antal LLM ↔ verktyg-rundor per chattvändning (1–20). Standard 8.',
+    loopCapHint: 'Max antal LLM ↔ verktyg-rundor per chattvändning (1–20). Standard 20.',
     recentRuns: 'Senaste körningar',
     noWorkspace: 'Öppna en mapp för att se denna arbetsytas agentkörningar.',
     loading: 'Läser in…',
@@ -1968,6 +1968,7 @@ export const sv: I18n = {
 
   // v4.0 pillar 1: Inline Agent Panel
   agent: {
+    toolsUsed: 'Tools × {n}',
     heading: 'Agent',
     empty: {
       noFolder: 'Öppna en mapp för att chatta med ditt valv.',

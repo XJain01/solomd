@@ -1943,7 +1943,7 @@ export const ko: I18n = {
     allowWriteHint:
       '기본 꺼짐. 켜면 Agent가 채팅에서 write_note / append_to_note를 호출할 수 있습니다. 읽기 전용 도구(list, read, search, backlinks, tags, outline, autogit log/diff)는 어느 쪽이든 작동합니다.',
     loopCap: '도구 루프 상한',
-    loopCapHint: '채팅 한 턴당 LLM ↔ 도구 왕복 최대 수(1–20). 기본 8.',
+    loopCapHint: '채팅 한 턴당 LLM ↔ 도구 왕복 최대 수(1–20). 기본 20.',
     recentRuns: '최근 실행',
     noWorkspace: '이 워크스페이스의 Agent 실행을 보려면 폴더를 여세요.',
     loading: '불러오는 중…',
@@ -1951,6 +1951,7 @@ export const ko: I18n = {
     refresh: '새로고침',
   },
   agent: {
+    toolsUsed: 'Tools × {n}',
     heading: 'Agent',
     empty: {
       noFolder: 'vault와 채팅하려면 폴더를 여세요.',

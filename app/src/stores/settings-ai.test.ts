@@ -27,3 +27,16 @@ test('loading MiniMax settings keeps explicit M3, legacy and custom models', () 
       model || 'MiniMax-M3.1-Flash');
   }
 });
+
+test('an untouched 8-turn agent cap migrates to 20, an explicit choice does not', () => {
+  storage.set('solomd.settings.v1', JSON.stringify({ agentToolLoopCap: 8 }));
+  setActivePinia(createPinia());
+  assert.equal(useSettingsStore().agentToolLoopCap, 20);
+
+  storage.set(
+    'solomd.settings.v1',
+    JSON.stringify({ agentToolLoopCap: 6, agentToolLoopCapRaised: true }),
+  );
+  setActivePinia(createPinia());
+  assert.equal(useSettingsStore().agentToolLoopCap, 6);
+});

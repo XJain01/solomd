@@ -1958,7 +1958,7 @@ export const nl: I18n = {
     allowWriteHint:
       'Standaard uit. Indien aan kan de agent write_note / append_to_note vanuit de chat aanroepen. Alleen-lezen tools (list, read, search, backlinks, tags, outline, autogit log/diff) werken hoe dan ook.',
     loopCap: 'Tool-loop limiet',
-    loopCapHint: 'Maximaal aantal LLM ↔ tool round-trips per chatbeurt (1–20). Standaard 8.',
+    loopCapHint: 'Maximaal aantal LLM ↔ tool round-trips per chatbeurt (1–20). Standaard 20.',
     recentRuns: 'Recente uitvoeringen',
     noWorkspace: 'Open een map om de agent-uitvoeringen van deze werkruimte te zien.',
     loading: 'Bezig met laden…',
@@ -1968,6 +1968,7 @@ export const nl: I18n = {
 
   // v4.0 pillar 1: Inline Agent Panel
   agent: {
+    toolsUsed: 'Tools × {n}',
     heading: 'Agent',
     empty: {
       noFolder: 'Open een map om met je vault te chatten.',

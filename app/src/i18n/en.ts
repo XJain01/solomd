@@ -1968,7 +1968,7 @@ export const en = {
     allowWriteHint:
       'Off by default. When on, the agent can call write_note / append_to_note from chat. Read-only tools (list, read, search, backlinks, tags, outline, autogit log/diff) work either way.',
     loopCap: 'Tool loop cap',
-    loopCapHint: 'Max LLM ↔ tool round-trips per chat turn (1–20). Default 8.',
+    loopCapHint: 'Max LLM ↔ tool round-trips per chat turn (1–20). Default 20.',
     recentRuns: 'Recent runs',
     noWorkspace: 'Open a folder to see this workspace\'s agent runs.',
     loading: 'Loading…',
@@ -1979,6 +1979,7 @@ export const en = {
   // v4.0 pillar 1: Inline Agent Panel
   agent: {
     heading: 'Agent',
+    toolsUsed: 'Tools × {n}',
     empty: {
       noFolder: 'Open a folder to chat with your vault.',
       noAi: 'Configure an AI provider to start chatting.',

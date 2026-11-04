@@ -1945,7 +1945,7 @@ export const zh: I18n = {
     allowWriteHint:
       '默认关闭。开启后，智能体可在对话中调用 write_note / append_to_note。只读工具（list / read / search / backlinks / tags / outline / autogit log/diff）不受此开关影响。',
     loopCap: '工具循环上限',
-    loopCapHint: '每轮对话允许的 LLM ↔ 工具往返次数（1–20）。默认 8。',
+    loopCapHint: '每轮对话允许的 LLM ↔ 工具往返次数（1–20）。默认 20。',
     recentRuns: '最近运行',
     noWorkspace: '请先打开一个文件夹以查看本 workspace 的智能体运行历史。',
     loading: '加载中…',
@@ -1956,6 +1956,7 @@ export const zh: I18n = {
   // v4.0 pillar 1: Inline Agent Panel
   agent: {
     heading: '智能体',
+    toolsUsed: '工具调用 × {n}',
     empty: {
       noFolder: '请先打开一个文件夹，再开始与笔记库对话。',
       noAi: '请先在设置里配置一个 AI 服务商。',

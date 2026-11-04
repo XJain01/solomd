@@ -1958,7 +1958,7 @@ export const tr: I18n = {
     allowWriteHint:
       'Varsayılan olarak kapalı. Açıkken aracı sohbetten write_note / append_to_note çağırabilir. Yalnızca okuma araçları (list, read, search, backlinks, tags, outline, autogit log/diff) her durumda çalışır.',
     loopCap: 'Araç döngüsü sınırı',
-    loopCapHint: 'Sohbet sırası başına LLM ↔ araç gidiş-dönüş üst sınırı (1–20). Varsayılan 8.',
+    loopCapHint: 'Sohbet sırası başına LLM ↔ araç gidiş-dönüş üst sınırı (1–20). Varsayılan 20.',
     recentRuns: 'Son çalıştırmalar',
     noWorkspace: 'Bu çalışma alanının aracı çalıştırmalarını görmek için bir klasör açın.',
     loading: 'Yükleniyor…',
@@ -1968,6 +1968,7 @@ export const tr: I18n = {
 
   // v4.0 pillar 1: Inline Agent Panel
   agent: {
+    toolsUsed: 'Tools × {n}',
     heading: 'Aracı',
     empty: {
       noFolder: 'Vault\'unuzla sohbet etmek için bir klasör açın.',

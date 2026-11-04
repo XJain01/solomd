@@ -1958,7 +1958,7 @@ export const pl: I18n = {
     allowWriteHint:
       'Domyślnie wyłączone. Po włączeniu agent może wywoływać write_note / append_to_note z czatu. Narzędzia tylko do odczytu (list, read, search, backlinks, tags, outline, autogit log/diff) działają niezależnie.',
     loopCap: 'Limit pętli narzędzi',
-    loopCapHint: 'Maksymalna liczba rund LLM ↔ narzędzia na turę czatu (1–20). Domyślnie 8.',
+    loopCapHint: 'Maksymalna liczba rund LLM ↔ narzędzia na turę czatu (1–20). Domyślnie 20.',
     recentRuns: 'Ostatnie uruchomienia',
     noWorkspace: 'Otwórz folder, aby zobaczyć uruchomienia agenta dla tego obszaru roboczego.',
     loading: 'Ładowanie…',
@@ -1968,6 +1968,7 @@ export const pl: I18n = {
 
   // v4.0 pillar 1: Inline Agent Panel
   agent: {
+    toolsUsed: 'Tools × {n}',
     heading: 'Agent',
     empty: {
       noFolder: 'Otwórz folder, aby rozmawiać ze swoim skarbcem.',

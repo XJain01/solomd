@@ -1943,7 +1943,7 @@ export const de: I18n = {
     allowWriteHint:
       'Standardmäßig aus. Wenn aktiv, kann der Agent write_note / append_to_note aus dem Chat aufrufen. Nur-Lese-Tools (list, read, search, backlinks, tags, outline, autogit log/diff) funktionieren immer.',
     loopCap: 'Tool-Schleifen-Limit',
-    loopCapHint: 'Maximale LLM ↔ Tool-Hin-und-Rück pro Chat-Runde (1–20). Standard 8.',
+    loopCapHint: 'Maximale LLM ↔ Tool-Hin-und-Rück pro Chat-Runde (1–20). Standard 20.',
     recentRuns: 'Letzte Läufe',
     noWorkspace: 'Ordner öffnen, um die Agent-Läufe dieses Workspace zu sehen.',
     loading: 'Wird geladen…',
@@ -1951,6 +1951,7 @@ export const de: I18n = {
     refresh: 'Aktualisieren',
   },
   agent: {
+    toolsUsed: 'Tools × {n}',
     heading: 'Agent',
     empty: {
       noFolder: 'Ordner öffnen, um mit Ihrem Vault zu chatten.',

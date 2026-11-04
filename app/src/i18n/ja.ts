@@ -1943,7 +1943,7 @@ export const ja: I18n = {
     allowWriteHint:
       'デフォルトはオフ。オンにすると Agent はチャットから write_note / append_to_note を呼び出せます。読み取り専用ツール（list、read、search、backlinks、tags、outline、autogit log/diff）はどちらの場合も動作します。',
     loopCap: 'ツールループ上限',
-    loopCapHint: 'チャット 1 ターンあたりの LLM ↔ ツール往復の最大数（1–20）。デフォルト 8。',
+    loopCapHint: 'チャット 1 ターンあたりの LLM ↔ ツール往復の最大数（1–20）。デフォルト 20。',
     recentRuns: '最近の実行',
     noWorkspace: 'このワークスペースの Agent 実行を見るにはフォルダを開いてください。',
     loading: '読み込み中…',
@@ -1951,6 +1951,7 @@ export const ja: I18n = {
     refresh: '更新',
   },
   agent: {
+    toolsUsed: 'Tools × {n}',
     heading: 'Agent',
     empty: {
       noFolder: 'vault とチャットするにはフォルダを開いてください。',

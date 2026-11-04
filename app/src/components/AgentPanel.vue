@@ -8,7 +8,7 @@
  * calls, [[citation]] parsing, and per-run persistence land in subsequent
  * commits on `feat/v4-panel`.
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useWorkspaceStore } from '../stores/workspace';
@@ -18,6 +18,7 @@ import { useTilesStore } from '../stores/tiles';
 import { useToastsStore } from '../stores/toasts';
 import { useWorkspaceIndexStore } from '../stores/workspaceIndex';
 import { useAgentPanelStore } from '../stores/agentPanel';
+import { buildAgentFeed } from '../lib/agent-feed';
 import { providerById, type ProviderId } from '../lib/ai-providers';
 import { parseWithWikilinks, chipLabel } from '../lib/wikilinks';
 import { useFiles } from '../composables/useFiles';
@@ -44,6 +45,16 @@ const draft = ref('');
 const errorMsg = ref<string | null>(null);
 const messagesRef = ref<HTMLUListElement | null>(null);
 const inputRef = ref<HTMLTextAreaElement | null>(null);
+
+/** Fold state for each run of consecutive tool calls. Keyed by the first
+ *  tool message id; collapsed by default so a 20-call run is one row. */
+const openToolGroups = reactive(new Set<string>());
+function toggleToolGroup(key: string) {
+  if (openToolGroups.has(key)) openToolGroups.delete(key);
+  else openToolGroups.add(key);
+}
+
+const agentFeed = computed(() => buildAgentFeed(agent.messages, agent.isStreaming));
 
 /** Toggle: include the active note's content as additional context on each
  *  send. Persisted across sessions in localStorage. Off by default — costs
@@ -73,7 +84,15 @@ const ACTIVE_NOTE_CHAR_LIMIT = 8192;
  * snippets + active note path) before the user's message.
  */
 const SYSTEM_PROMPT =
-  'You are a helpful writing and research assistant inside SoloMD, a local-first markdown editor. The user is chatting with you about their notes. Be concise and accurate. Use markdown formatting in replies when helpful. If the user asks about specific notes you have not been shown, ask which note they mean rather than fabricating content.';
+  'You are an autonomous writing and research agent inside SoloMD, a local-first markdown editor. ' +
+  'You can call tools to list, search, read, and (when enabled) write notes in the user’s vault. ' +
+  'Act instead of asking: when you need to know which note, folder, heading, or tag the user means, ' +
+  'use list_notes / search / read_note to find it; never ask the user for information a tool can retrieve. ' +
+  'Keep working until the task is complete: do not stop after one step to report progress or ask for permission, ' +
+  'and do not hand work back because a detail is uncertain — make the smallest reasonable assumption, state it, and continue. ' +
+  'Ask a question only when the request is genuinely ambiguous or the next action would be destructive, and then ask at most one. ' +
+  'When you finish, summarize what you changed and what (if anything) still needs the user. ' +
+  'Be concise and accurate; use markdown formatting when helpful.';
 
 /**
  * Build a workspace-context system message describing where the user is.
@@ -518,53 +537,81 @@ watch(stateKey, (k) => {
     <template v-else>
       <ul ref="messagesRef" v-if="agent.messages.length" class="agent-panel__messages">
         <li
-          v-for="(m, i) in agent.messages"
-          :key="m.id"
+          v-for="item in agentFeed"
+          :key="item.key"
           class="agent-panel__msg"
-          :class="`agent-panel__msg--${m.role}`"
+          :class="item.kind === 'tools'
+            ? 'agent-panel__msg--toolgroup'
+            : `agent-panel__msg--${item.message.role}`"
         >
-          <!-- Tool-call card: collapsed by default. Click to expand args + result. -->
-          <div v-if="m.role === 'tool' && m.tool" class="agent-panel__tool">
+          <!-- Consecutive tool calls fold into one row. A 15-call run used to
+               render 15 cards plus 15 empty assistant placeholders and push
+               the actual conversation off screen. -->
+          <div v-if="item.kind === 'tools'" class="agent-panel__tool-group">
             <button
-              class="agent-panel__tool-head"
-              :class="{ 'agent-panel__tool-head--err': !!m.tool.error, 'agent-panel__tool-head--pending': !m.tool.result && !m.tool.error }"
+              class="agent-panel__tool-group-head"
               type="button"
-              :aria-expanded="!!m.tool.expanded"
-              @click="agent.toggleToolExpand(m.tool.toolCallId)"
+              :aria-expanded="openToolGroups.has(item.key)"
+              @click="toggleToolGroup(item.key)"
             >
-              <span class="agent-panel__tool-icon" aria-hidden="true">
-                <span v-if="!m.tool.result && !m.tool.error" class="agent-panel__tool-spinner" />
-                <Icons v-else-if="m.tool.error" name="info" :size="14" />
-                <Icons v-else name="wrench" :size="14" />
-              </span>
-              <code class="agent-panel__tool-sig">{{ m.tool.name }}({{ formatArgsInline(m.tool.args) }})</code>
               <Icons
-                class="agent-panel__tool-caret"
-                :name="m.tool.expanded ? 'chevron-down' : 'chevron-right'"
+                :name="openToolGroups.has(item.key) ? 'chevron-down' : 'chevron-right'"
                 :size="12"
               />
+              <Icons name="wrench" :size="13" />
+              <span class="agent-panel__tool-group-count">{{ t('agent.toolsUsed', { n: item.tools.length }) }}</span>
+              <code class="agent-panel__tool-group-names">{{ item.tools.map((tool) => tool.tool?.name).join(' · ') }}</code>
+              <span
+                v-if="item.tools.some((tool) => tool.tool && !tool.tool.result && !tool.tool.error)"
+                class="agent-panel__tool-spinner"
+              />
             </button>
-            <div v-if="m.tool.expanded" class="agent-panel__tool-body">
-              <div class="agent-panel__tool-section">
-                <div class="agent-panel__tool-label">args</div>
-                <pre class="agent-panel__tool-pre">{{ JSON.stringify(m.tool.args, null, 2) }}</pre>
-              </div>
-              <div class="agent-panel__tool-section">
-                <div class="agent-panel__tool-label">{{ m.tool.error ? 'error' : 'result' }}</div>
-                <pre
-                  class="agent-panel__tool-pre"
-                  :class="{ 'agent-panel__tool-pre--err': !!m.tool.error }"
-                >{{ m.tool.error || m.tool.result || '(waiting…)' }}</pre>
-              </div>
+            <div v-if="openToolGroups.has(item.key)" class="agent-panel__tool-group-body">
+              <template v-for="m in item.tools" :key="m.id">
+                <div v-if="m.tool" class="agent-panel__tool">
+                  <button
+                    class="agent-panel__tool-head"
+                    :class="{ 'agent-panel__tool-head--err': !!m.tool!.error, 'agent-panel__tool-head--pending': !m.tool!.result && !m.tool!.error }"
+                    type="button"
+                    :aria-expanded="!!m.tool!.expanded"
+                    @click="agent.toggleToolExpand(m.tool!.toolCallId)"
+                  >
+                    <span class="agent-panel__tool-icon" aria-hidden="true">
+                      <span v-if="!m.tool!.result && !m.tool!.error" class="agent-panel__tool-spinner" />
+                      <Icons v-else-if="m.tool!.error" name="info" :size="14" />
+                      <Icons v-else name="wrench" :size="14" />
+                    </span>
+                    <code class="agent-panel__tool-sig">{{ m.tool!.name }}({{ formatArgsInline(m.tool!.args) }})</code>
+                    <Icons
+                      class="agent-panel__tool-caret"
+                      :name="m.tool!.expanded ? 'chevron-down' : 'chevron-right'"
+                      :size="12"
+                    />
+                  </button>
+                  <div v-if="m.tool!.expanded" class="agent-panel__tool-body">
+                    <div class="agent-panel__tool-section">
+                      <div class="agent-panel__tool-label">args</div>
+                      <pre class="agent-panel__tool-pre">{{ JSON.stringify(m.tool!.args, null, 2) }}</pre>
+                    </div>
+                    <div class="agent-panel__tool-section">
+                      <div class="agent-panel__tool-label">{{ m.tool!.error ? 'error' : 'result' }}</div>
+                      <pre
+                        class="agent-panel__tool-pre"
+                        :class="{ 'agent-panel__tool-pre--err': !!m.tool!.error }"
+                      >{{ m.tool!.error || m.tool!.result || '(waiting…)' }}</pre>
+                    </div>
+                  </div>
+                </div>
+              </template>
             </div>
           </div>
 
           <!-- User / assistant / system text. Assistant text gets wikilink chips. -->
           <template v-else>
-            <div class="agent-panel__msg-role">{{ m.role }}</div>
+            <div class="agent-panel__msg-role">{{ item.message.role }}</div>
             <div class="agent-panel__msg-body">
-              <template v-if="m.role === 'assistant'">
-                <template v-for="(run, ri) in renderRuns(m.content)" :key="ri">
+              <template v-if="item.message.role === 'assistant'">
+                <template v-for="(run, ri) in renderRuns(item.message.content)" :key="ri">
                   <button
                     v-if="run.type === 'wikilink'"
                     class="agent-panel__wiki"
@@ -575,9 +622,9 @@ watch(stateKey, (k) => {
                   <span v-else>{{ run.value }}</span>
                 </template>
               </template>
-              <span v-else>{{ m.content }}</span>
+              <span v-else>{{ item.message.content }}</span>
               <span
-                v-if="m.role === 'assistant' && agent.isStreaming && i === agent.messages.length - 1"
+                v-if="item.message.role === 'assistant' && agent.isStreaming && item.index === agent.messages.length - 1"
                 class="agent-panel__cursor"
                 aria-hidden="true"
               >▌</span>
@@ -589,22 +636,22 @@ watch(stateKey, (k) => {
                  (would copy/insert a half-finished reply) and on user
                  messages (no point copying your own prompt). -->
             <div
-              v-if="m.role === 'assistant' && m.content
-                && !(agent.isStreaming && i === agent.messages.length - 1)"
+              v-if="item.message.role === 'assistant' && item.message.content
+                && !(agent.isStreaming && item.index === agent.messages.length - 1)"
               class="agent-panel__msg-actions"
             >
               <button
                 class="rp-btn rp-btn--sm rp-btn--ghost agent-panel__msg-action"
                 type="button"
                 :title="t('agent.msgCopyTitle')"
-                @click="copyAssistantMessage(m.content)"
+                @click="copyAssistantMessage(item.message.content)"
               >{{ t('agent.msgCopy') }}</button>
               <button
                 class="rp-btn rp-btn--sm rp-btn--ghost agent-panel__msg-action"
                 type="button"
                 :disabled="!canInsertIntoEditor"
                 :title="canInsertIntoEditor ? t('agent.msgInsertTitle') : t('agent.msgInsertNoEditor')"
-                @click="insertAssistantMessage(m.content)"
+                @click="insertAssistantMessage(item.message.content)"
               >{{ t('agent.msgInsert') }}</button>
             </div>
           </template>
@@ -776,6 +823,57 @@ watch(stateKey, (k) => {
   border-radius: var(--r-lg);
   background: var(--bg-elev);
   overflow: hidden;
+}
+/* One foldable row for a run of tool calls. */
+.agent-panel__tool-group {
+  border: var(--bd-hair);
+  border-radius: var(--r-lg);
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+.agent-panel__tool-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.agent-panel__tool-group-head:hover {
+  background: var(--fill-1);
+}
+.agent-panel__tool-group-head:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent-ring);
+}
+.agent-panel__tool-group-count {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+.agent-panel__tool-group-names {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+}
+.agent-panel__tool-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-top: var(--bd-hair);
 }
 .agent-panel__tool-head {
   display: flex;

@@ -1958,7 +1958,7 @@ export const uk: I18n = {
     allowWriteHint:
       'Вимкнено за замовчуванням. Якщо ввімкнено, агент може викликати write_note / append_to_note з чату. Інструменти лише для читання (list, read, search, backlinks, tags, outline, autogit log/diff) працюють у будь-якому випадку.',
     loopCap: 'Обмеження циклу інструментів',
-    loopCapHint: 'Макс. кількість обмінів LLM ↔ інструмент за один хід чату (1–20). Типово 8.',
+    loopCapHint: 'Макс. кількість обмінів LLM ↔ інструмент за один хід чату (1–20). Типово 20.',
     recentRuns: 'Нещодавні запуски',
     noWorkspace: 'Відкрийте теку, щоб побачити запуски агента в цьому робочому просторі.',
     loading: 'Завантаження…',
@@ -1968,6 +1968,7 @@ export const uk: I18n = {
 
   // v4.0 pillar 1: Inline Agent Panel
   agent: {
+    toolsUsed: 'Tools × {n}',
     heading: 'Агент',
     empty: {
       noFolder: 'Відкрийте теку, щоб поспілкуватися зі своїм сховищем.',

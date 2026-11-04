@@ -232,8 +232,12 @@ interface Settings {
   // from chat. Default off — the agent is read-only by default.
   agentAllowWrite: boolean;
   // v4.0 pillar 1: max number of LLM ↔ tool round-trips per chat turn.
-  // Cap protects against a runaway tool loop. C3.2 default is 8.
+  // Cap protects against a runaway tool loop. 5.1.2 raised the default from
+  // 8 to 20: ordinary vault questions were spending all 8 turns on tools and
+  // ending without a reply.
   agentToolLoopCap: number;
+  /** One-time marker: old installs stored the 8-turn default explicitly. */
+  agentToolLoopCapRaised: boolean;
   // Width (in px) of the right/left side sidebar that hosts Outline /
   // Backlinks / Tags / History. User-resizable via the drag handle.
   sideSidebarWidth: number;
@@ -752,7 +756,8 @@ function defaults(): Settings {
     // once before setting the marker on disk.
     v4AgentPanelMigrated: true,
     agentAllowWrite: false,
-    agentToolLoopCap: 8,
+    agentToolLoopCap: 20,
+    agentToolLoopCapRaised: true,
     sideSidebarWidth: 260,
     agentDockWidth: 440,
     fileTreeWidth: 260,
@@ -1037,6 +1042,14 @@ function load(): Settings {
       if (!parsed.v507HighlightLineMigrated) {
         merged.highlightCurrentLine = true;
         merged.v507HighlightLineMigrated = true;
+      }
+      // 5.1.2 — old installs saved the 8-turn default as an explicit value.
+      // With a tool-first agent prompt, 8 turns of exploration is easy to
+      // hit; a run then ended with a wall of tool cards and no reply. Raise
+      // an untouched 8 once; a deliberately chosen value is left alone.
+      if (!parsed.agentToolLoopCapRaised) {
+        if (merged.agentToolLoopCap === 8) merged.agentToolLoopCap = 20;
+        merged.agentToolLoopCapRaised = true;
       }
       // D6 — a theme outside the built-in list (e.g. a hand-edited or
       // MCP-written 'system') rendered as a bare white page; reset it to the
@@ -1532,7 +1545,7 @@ export const useSettingsStore = defineStore('settings', {
       this.persist();
     },
     setAgentToolLoopCap(n: number) {
-      const clean = Math.max(1, Math.min(20, Math.round(n) || 8));
+      const clean = Math.max(1, Math.min(20, Math.round(n) || 20));
       this.agentToolLoopCap = clean;
       this.persist();
     },
