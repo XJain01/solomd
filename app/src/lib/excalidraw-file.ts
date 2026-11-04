@@ -63,12 +63,19 @@ export function serializeExcalidrawScene(scene: ExcalidrawScene): string {
 }
 
 export function drawingTitle(fileName: string): string {
-  return fileName.replace(/\.excalidraw$/i, '');
+  return fileName.replace(/\.excalidraw(\.md)?$/i, '');
+}
+
+export type DrawingFormat = 'markdown' | 'json';
+
+/** `.excalidraw.md` is the Obsidian plugin format; legacy `.excalidraw` is JSON. */
+export function drawingFormat(filePath: string): DrawingFormat {
+  return /\.excalidraw\.md$/i.test(filePath) ? 'markdown' : 'json';
 }
 
 const INVALID = /[\\/:*?"<>|\u0000-\u001f]/g;
 
-/** Filesystem-safe, collision-free `<name>.excalidraw`. `taken` is mutated. */
+/** Filesystem-safe, collision-free `<name>.excalidraw.md`. `taken` is mutated. */
 export function safeDrawingFileName(name: string, taken: Set<string>): string {
   let base = name
     .trim()
@@ -77,10 +84,10 @@ export function safeDrawingFileName(name: string, taken: Set<string>): string {
     .replace(/^\.+/, '')
     .trim();
   if (!base) base = 'drawing';
-  let candidate = `${base}.excalidraw`;
+  let candidate = `${base}.excalidraw.md`;
   let n = 2;
   while (taken.has(candidate.toLowerCase())) {
-    candidate = `${base}-${n}.excalidraw`;
+    candidate = `${base}-${n}.excalidraw.md`;
     n++;
   }
   taken.add(candidate.toLowerCase());

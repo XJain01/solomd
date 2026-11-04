@@ -42,9 +42,10 @@ test('serialization round-trips and ends with a newline', () => {
 
 test('drawing file names are titled, safe, and collision-free', () => {
   assert.equal(drawingTitle('Work.excalidraw'), 'Work');
+  assert.equal(drawingTitle('Work.excalidraw.md'), 'Work');
   const taken = new Set<string>();
-  assert.equal(safeDrawingFileName('Work', taken), 'Work.excalidraw');
-  assert.equal(safeDrawingFileName('Work', taken), 'Work-2.excalidraw');
-  assert.equal(safeDrawingFileName('a/b:c', taken), 'a-b-c.excalidraw');
-  assert.equal(safeDrawingFileName('  ', taken), 'drawing.excalidraw');
+  assert.equal(safeDrawingFileName('Work', taken), 'Work.excalidraw.md');
+  assert.equal(safeDrawingFileName('Work', taken), 'Work-2.excalidraw.md');
+  assert.equal(safeDrawingFileName('a/b:c', taken), 'a-b-c.excalidraw.md');
+  assert.equal(safeDrawingFileName('  ', taken), 'drawing.excalidraw.md');
 });

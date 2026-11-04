@@ -23,6 +23,42 @@ interface Runtime {
   React: any;
   createRoot: (el: Element) => { render(node: unknown): void; unmount(): void };
   Excalidraw: any;
+  serializeAsJSON: (
+    elements: readonly unknown[],
+    appState: Record<string, unknown>,
+    files: Record<string, unknown>,
+    mode: 'local' | 'database' | 'clipboard',
+  ) => string;
+}
+
+/** Drop fields Excalidraw only keeps in memory (Maps, element refs). A Map
+ *  stringifies to `{}`, and reloading it crashes with
+ *  `appState.collaborators.forEach is not a function`. */
+function sanitizeAppState(appState: Record<string, unknown>): Record<string, unknown> {
+  const clean = { ...appState };
+  for (const key of [
+    'collaborators',
+    'editingElement',
+    'editingGroupId',
+    'editingLinearElement',
+    'newElement',
+    'activeEmbeddable',
+    'cursorButton',
+    'selectionElement',
+    'resizingElement',
+    'multiElement',
+    'hoveredElement',
+    'selectedLinearElement',
+    'lastPointerDownWith',
+    'contextMenu',
+    'openPopup',
+    'openSidebar',
+    'openDialog',
+    'showWelcomeScreen',
+  ]) {
+    delete clean[key];
+  }
+  return clean;
 }
 
 let runtimePromise: Promise<Runtime> | null = null;
@@ -40,6 +76,7 @@ async function loadRuntime(): Promise<Runtime> {
         React: (React as any).default ?? React,
         createRoot,
         Excalidraw: mod.Excalidraw,
+        serializeAsJSON: mod.serializeAsJSON,
       };
     })();
   }
@@ -50,21 +87,42 @@ export async function mountExcalidraw(
   el: HTMLElement,
   opts: MountExcalidrawOptions,
 ): Promise<ExcalidrawHandle> {
-  const { React, createRoot, Excalidraw } = await loadRuntime();
+  const { React, createRoot, Excalidraw, serializeAsJSON } = await loadRuntime();
   const initial = opts.initialScene;
+  const initialAppState = sanitizeAppState(initial.appState);
 
   function onChange(elements: unknown[], appState: unknown, files: unknown) {
+    const rawState =
+      appState && typeof appState === 'object'
+        ? (appState as Record<string, unknown>)
+        : {};
+    const rawFiles =
+      files && typeof files === 'object' ? (files as Record<string, unknown>) : {};
+    let scene: ExcalidrawScene;
+    try {
+      scene = JSON.parse(
+        serializeAsJSON(
+          Array.isArray(elements) ? elements : [],
+          rawState,
+          rawFiles,
+          'local',
+        ),
+      ) as ExcalidrawScene;
+    } catch {
+      scene = {
+        type: 'excalidraw',
+        version: 2,
+        source: 'solomd',
+        elements: Array.isArray(elements) ? elements : [],
+        appState: sanitizeAppState(rawState),
+        files: rawFiles,
+      };
+    }
     opts.onChange({
+      ...scene,
       type: 'excalidraw',
       version: 2,
       source: 'solomd',
-      elements: Array.isArray(elements) ? elements : [],
-      appState:
-        appState && typeof appState === 'object'
-          ? (appState as Record<string, unknown>)
-          : {},
-      files:
-        files && typeof files === 'object' ? (files as Record<string, unknown>) : {},
     });
   }
 
@@ -72,7 +130,7 @@ export async function mountExcalidraw(
     return React.createElement(Excalidraw, {
       initialData: {
         elements: initial.elements,
-        appState: initial.appState,
+        appState: initialAppState,
         files: initial.files,
         scrollToContent: true,
       },

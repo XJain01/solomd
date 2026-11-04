@@ -12,6 +12,7 @@ import { useI18n } from '../i18n';
 import { useSettingsStore } from '../stores/settings';
 import { useWorkspaceStore } from '../stores/workspace';
 import {
+  drawingFormat,
   drawingTitle,
   emptyExcalidrawScene,
   parseExcalidrawScene,
@@ -19,8 +20,14 @@ import {
   serializeExcalidrawScene,
   type ExcalidrawScene,
 } from '../lib/excalidraw-file';
+import {
+  parseExcalidrawMarkdown,
+  serializeExcalidrawMarkdown,
+} from '../lib/excalidraw-markdown';
 import { mountExcalidraw, type ExcalidrawHandle } from '../lib/excalidraw-runtime';
 import { DRAWING_CLOSE_EVENT } from '../composables/useDrawingView';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import type { UnlistenFn } from '@tauri-apps/api/event';
 
 interface DirEntry {
   name: string;
@@ -67,6 +74,8 @@ let handle: ExcalidrawHandle | null = null;
 let mountToken = 0;
 let saveTimer = 0;
 let pendingScene: ExcalidrawScene | null = null;
+let unlistenClose: UnlistenFn | null = null;
+let closingWindow = false;
 
 const hasFolder = computed(() => !!workspace.currentFolder);
 
@@ -91,15 +100,52 @@ async function ensureDir(): Promise<string> {
 
 async function listDrawings(): Promise<DrawingFile[]> {
   if (!workspace.currentFolder) return [];
-  await ensureDir();
-  const entries = await invoke<DirEntry[]>('list_dir', { path: drawingsDir() });
+  const dir = await ensureDir();
+  let entries = await invoke<DirEntry[]>('list_dir', { path: dir });
+
+  // One-time bridge: legacy `.excalidraw` JSON -> Obsidian `.excalidraw.md`.
+  // The old file is kept as a backup and hidden once its `.md` sibling exists.
+  const names = new Set(entries.map((entry) => entry.name.toLowerCase()));
+  let migrated = false;
+  for (const entry of entries) {
+    if (entry.is_dir || !/\.excalidraw$/i.test(entry.name)) continue;
+    const mdName = `${entry.name}.md`;
+    if (names.has(mdName.toLowerCase())) continue;
+    try {
+      const res = await invoke<{ content: string }>('read_file', { path: entry.path });
+      const scene = parseExcalidrawScene(res.content);
+      await invoke('write_file', {
+        path: joinPath(dir, mdName),
+        content: serializeExcalidrawMarkdown(scene),
+        encoding: 'UTF-8',
+      });
+      names.add(mdName.toLowerCase());
+      migrated = true;
+    } catch (err) {
+      console.warn('[drawing] legacy migration failed', entry.path, err);
+    }
+  }
+  if (migrated) entries = await invoke<DirEntry[]>('list_dir', { path: dir });
+
+  const mdNames = new Set(
+    entries
+      .filter((entry) => /\.excalidraw\.md$/i.test(entry.name))
+      .map((entry) => entry.name.toLowerCase()),
+  );
   return entries
-    .filter((entry) => !entry.is_dir && /\.excalidraw$/i.test(entry.name) && entry.path)
+    .filter(
+      (entry) =>
+        !entry.is_dir &&
+        !!entry.path &&
+        (/\.excalidraw\.md$/i.test(entry.name) ||
+          (/\.excalidraw$/i.test(entry.name) && !mdNames.has(`${entry.name}.md`.toLowerCase()))),
+    )
     .map((entry) => ({ name: entry.name, path: entry.path }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function close() {
+  flush();
   window.dispatchEvent(new CustomEvent(DRAWING_CLOSE_EVENT));
 }
 
@@ -111,7 +157,10 @@ async function saveNow() {
   try {
     await invoke('write_file', {
       path,
-      content: serializeExcalidrawScene(scene),
+      content:
+        drawingFormat(path) === 'markdown'
+          ? serializeExcalidrawMarkdown(scene)
+          : serializeExcalidrawScene(scene),
       encoding: 'UTF-8',
     });
   } catch (err) {
@@ -133,7 +182,7 @@ function scheduleSave(scene: ExcalidrawScene) {
   saveTimer = window.setTimeout(() => {
     saveTimer = 0;
     void saveNow();
-  }, 500);
+  }, 200);
 }
 
 async function mountActive(scene: ExcalidrawScene) {
@@ -155,8 +204,8 @@ async function mountActive(scene: ExcalidrawScene) {
   handle = mounted;
 }
 
-async function selectDrawing(path: string) {
-  if (path === activePath.value && handle) return;
+async function selectDrawing(path: string, force = false) {
+  if (!force && path === activePath.value && handle) return;
   flush();
   handle?.destroy();
   handle = null;
@@ -166,7 +215,17 @@ async function selectDrawing(path: string) {
   lastError.value = null;
   try {
     const res = await invoke<{ content: string }>('read_file', { path });
-    await mountActive(parseExcalidrawScene(res.content));
+    const scene =
+      drawingFormat(path) === 'markdown'
+        ? parseExcalidrawMarkdown(res.content)
+        : parseExcalidrawScene(res.content);
+    await mountActive(scene);
+    // The dynamic import can resolve after the surface was re-created; retry
+    // once so reopening a drawing never leaves an empty white canvas.
+    if (!canvasEl.value?.querySelector('.excalidraw')) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      if (!canvasEl.value?.querySelector('.excalidraw')) await mountActive(scene);
+    }
   } catch (err) {
     lastError.value = String(err);
   } finally {
@@ -189,7 +248,9 @@ async function refresh() {
       handle?.destroy();
       handle = null;
     }
-    if (!activePath.value && drawings.value[0]) {
+    if (activePath.value && !handle) {
+      await selectDrawing(activePath.value, true);
+    } else if (!activePath.value && drawings.value[0]) {
       await selectDrawing(drawings.value[0].path);
     }
   } catch (err) {
@@ -213,7 +274,7 @@ async function commitCreate() {
     const path = joinPath(dir, fileName);
     await invoke('write_file', {
       path,
-      content: serializeExcalidrawScene(emptyExcalidrawScene()),
+      content: serializeExcalidrawMarkdown(emptyExcalidrawScene()),
       encoding: 'UTF-8',
     });
     creating.value = false;
@@ -241,7 +302,34 @@ async function removeDrawing() {
   }
 }
 
-onMounted(refresh);
+function onPageHide() {
+  flush();
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'hidden') flush();
+}
+
+onMounted(async () => {
+  window.addEventListener('pagehide', onPageHide);
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  try {
+    const win = getCurrentWindow();
+    unlistenClose = await win.onCloseRequested(async (event) => {
+      if (closingWindow || !activePath.value || !pendingScene) return;
+      event.preventDefault();
+      closingWindow = true;
+      await saveNow();
+      unlistenClose?.();
+      unlistenClose = null;
+      await win.destroy();
+    });
+  } catch {
+    /* window API unavailable in this build */
+  }
+  await refresh();
+});
+
 watch(() => workspace.currentFolder, refresh);
 watch(
   () => settings.theme,
@@ -249,6 +337,10 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  window.removeEventListener('pagehide', onPageHide);
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+  unlistenClose?.();
+  unlistenClose = null;
   flush();
   handle?.destroy();
   handle = null;
