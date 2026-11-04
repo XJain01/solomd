@@ -3,16 +3,20 @@
  * Center-pane task kanban. Projects, columns, and tasks are created by the
  * user and stored on this device. Notes in the vault are not cards.
  */
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Icons from './Icons.vue';
 import '../styles/panels.css';
 import { useI18n } from '../i18n';
 import { useKanbanStore } from '../stores/kanban';
+import { useWorkspaceStore } from '../stores/workspace';
+import { useFiles } from '../composables/useFiles';
 import type { KanbanTask } from '../lib/kanban';
 import { KANBAN_CLOSE_EVENT } from '../composables/useKanbanView';
 
 const { t } = useI18n();
 const board = useKanbanStore();
+const workspace = useWorkspaceStore();
+const files = useFiles();
 
 const project = computed(() =>
   board.projects.find((p) => p.id === board.activeProjectId) ?? board.projects[0] ?? null,
@@ -48,6 +52,20 @@ function close() {
   window.dispatchEvent(new CustomEvent(KANBAN_CLOSE_EVENT));
 }
 
+async function openSource() {
+  const path = project.value?.filePath;
+  if (!path) return;
+  close();
+  await files.openPath(path, { bypassNewWindow: true });
+}
+
+function loadBoards() {
+  void board.load(workspace.currentFolder);
+}
+
+onMounted(loadBoards);
+watch(() => workspace.currentFolder, loadBoards);
+
 function defaultColumns(): string[] {
   return [t('kanban.colTodo'), t('kanban.colDoing'), t('kanban.colDone')];
 }
@@ -57,10 +75,10 @@ function startProject() {
   projectDraft.value = '';
 }
 
-function commitProject() {
+async function commitProject() {
   const name = projectDraft.value.trim();
   if (!name) return;
-  board.createProject(name, defaultColumns());
+  await board.createProject(name, defaultColumns());
   creatingProject.value = false;
   projectDraft.value = '';
 }
@@ -72,7 +90,7 @@ function startProjectRename() {
   nextTick(() => projectNameInput.value?.focus());
 }
 
-function commitProjectName(name: string) {
+async function commitProjectName(name: string) {
   if (skipRenameCommit) {
     skipRenameCommit = false;
     renamingProject.value = false;
@@ -82,7 +100,7 @@ function commitProjectName(name: string) {
   renamingProject.value = false;
   const trimmed = name.trim();
   if (!current || !trimmed || trimmed === current.name) return;
-  board.renameProject(current.id, trimmed);
+  await board.renameProject(current.id, trimmed);
 }
 
 function cancelProjectRename() {
@@ -90,11 +108,11 @@ function cancelProjectRename() {
   renamingProject.value = false;
 }
 
-function removeProject() {
+async function removeProject() {
   const current = project.value;
   if (!current) return;
   if (!window.confirm(t('kanban.confirmDeleteProject'))) return;
-  board.deleteProject(current.id);
+  await board.deleteProject(current.id);
 }
 
 function commitColumn() {
@@ -136,6 +154,13 @@ function openTask(task: KanbanTask) {
   editingId.value = task.id;
   editTitle.value = task.title;
   editNotes.value = task.notes;
+}
+
+/** Toggle `[ ]` / `[x]` without opening the editor. */
+function toggleTask(task: KanbanTask) {
+  const current = project.value;
+  if (!current) return;
+  board.updateTask(current.id, task.id, { checked: !task.checked });
 }
 
 function saveTask() {
@@ -277,10 +302,18 @@ onBeforeUnmount(() => {
       </span>
       <span class="pg-spacer" />
       <span class="kanban__actions">
+        <button
+          v-if="project?.filePath"
+          class="rp-btn"
+          type="button"
+          @click="openSource"
+        >{{ t('kanban.openSource') }}</button>
         <button class="rp-btn" type="button" @click="startProject">{{ t('kanban.newProject') }}</button>
         <button v-if="project" class="rp-btn" type="button" @click="removeProject">{{ t('kanban.deleteProject') }}</button>
       </span>
     </header>
+
+    <p v-if="board.lastError" class="kanban__error">{{ board.lastError }}</p>
 
     <form v-if="creatingProject" class="kanban__create" @submit.prevent="commitProject">
       <input
@@ -294,7 +327,11 @@ onBeforeUnmount(() => {
       <button class="rp-btn" type="button" @click="creatingProject = false">{{ t('kanban.cancel') }}</button>
     </form>
 
-    <div v-if="!project && !creatingProject" class="kanban__empty">
+    <div v-if="board.loading" class="kanban__empty">
+      <p class="kanban__empty-body">{{ t('kanban.loading') }}</p>
+    </div>
+
+    <div v-else-if="!project && !creatingProject" class="kanban__empty">
       <p class="kanban__empty-title">{{ t('kanban.emptyTitle') }}</p>
       <p class="kanban__empty-body">{{ t('kanban.emptyBody') }}</p>
       <button class="rp-btn" type="button" @click="startProject">{{ t('kanban.newProject') }}</button>
@@ -344,7 +381,18 @@ onBeforeUnmount(() => {
                 </div>
               </template>
               <template v-else>
-                <span class="kanban__card-title">{{ task.title }}</span>
+                <span class="kanban__card-line">
+                  <input
+                    class="kanban__check"
+                    type="checkbox"
+                    :checked="!!task.checked"
+                    :aria-label="t('kanban.taskDone')"
+                    @click.stop
+                    @pointerdown.stop
+                    @change="toggleTask(task)"
+                  />
+                  <span class="kanban__card-title" :class="{ 'kanban__card-title--done': task.checked }">{{ task.title }}</span>
+                </span>
                 <span v-if="task.notes" class="kanban__card-notes">{{ task.notes }}</span>
                 <!-- Deliberate alternative to double-click: a single click here
                      is unambiguous because it sits on a control, not the card. -->
@@ -565,6 +613,27 @@ onBeforeUnmount(() => {
   -webkit-user-select: text;
 }
 .kanban__card-title { font-weight: 560; line-height: 1.4; }
+.kanban__card-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.kanban__check {
+  flex: 0 0 auto;
+  margin: 3px 0 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.kanban__card-title--done {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+.kanban__error {
+  margin: 0;
+  padding: 6px 16px;
+  color: var(--danger);
+  font-size: 12px;
+}
 .kanban__card-edit {
   position: absolute;
   top: 6px;

@@ -13,6 +13,8 @@ export interface KanbanTask {
   columnId: string;
   title: string;
   notes: string;
+  /** Markdown `[x]`. Older localStorage boards have no such field. */
+  checked?: boolean;
 }
 
 export interface KanbanProject {
@@ -190,7 +192,7 @@ export function updateTask(
   board: KanbanBoard,
   projectId: string,
   taskId: string,
-  patch: { title?: string; notes?: string; columnId?: string },
+  patch: { title?: string; notes?: string; columnId?: string; checked?: boolean },
 ): KanbanBoard {
   return withProject(board, projectId, (p) => ({
     ...p,
@@ -206,6 +208,7 @@ export function updateTask(
         title,
         notes: patch.notes !== undefined ? patch.notes : task.notes,
         columnId,
+        ...(patch.checked !== undefined ? { checked: patch.checked } : {}),
       };
     }),
   }));
