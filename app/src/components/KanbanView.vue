@@ -45,15 +45,15 @@ const checklistDraft = ref('');
 
 const dragging = ref<string | null>(null);
 const overCol = ref<string | null>(null);
+// Card under the cursor, used only while the mouse button is down so the
+// card does not look draggable on hover.
+const pressingId = ref<string | null>(null);
 // The card under the cursor stays where it is (dimmed); this follows the
 // pointer so the drag has something visible in the hand.
 const ghost = ref<{ x: number; y: number; title: string } | null>(null);
-// A drag that ends back over a card still fires click/dblclick, which would
-// drop the user into the editor by accident. Swallow the following open for as
-// long as the browser's double-click window is live.
-let justDragged = false;
-let justDraggedTimer = 0;
-let dragStart: { x: number; y: number; id: string; moved: boolean } | null = null;
+let holdTimer = 0;
+let held = false;
+let dragStart: { x: number; y: number; id: string; moved: boolean; startedAt: number } | null = null;
 
 function close() {
   window.dispatchEvent(new CustomEvent(KANBAN_CLOSE_EVENT));
@@ -181,7 +181,6 @@ function addTask(columnId: string) {
 }
 
 function openDetail(task: KanbanTask) {
-  if (justDragged) return;
   detailId.value = task.id;
   detailTitle.value = task.title;
   detailNotes.value = task.notes;
@@ -257,7 +256,16 @@ function onCardPointerDown(e: PointerEvent, id: string) {
   // ourselves (preventDefault also suppresses the browser's own focus handling).
   e.preventDefault();
   (e.currentTarget as HTMLElement | null)?.focus();
-  dragStart = { x: e.clientX, y: e.clientY, id, moved: false };
+  pressingId.value = id;
+  held = false;
+  window.clearTimeout(holdTimer);
+  holdTimer = window.setTimeout(() => {
+    held = true;
+  }, 250);
+  dragStart = { x: e.clientX, y: e.clientY, id, moved: false, startedAt: Date.now() };
+  // The hand appears only while the button is down — hover uses the normal
+  // cursor. A quick release opens details; a hold or a drag does not.
+  setDragChrome(true);
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerup', onPointerUp);
   window.addEventListener('pointercancel', onPointerUp);
@@ -276,6 +284,7 @@ function clearDragVisuals() {
   dragging.value = null;
   overCol.value = null;
   ghost.value = null;
+  pressingId.value = null;
   setDragChrome(false);
 }
 
@@ -287,7 +296,6 @@ function onPointerMove(e: PointerEvent) {
   if (!dragStart.moved) {
     dragStart.moved = true;
     dragging.value = dragStart.id;
-    setDragChrome(true);
   }
   ghost.value = { x: e.clientX, y: e.clientY, title: taskTitle(dragStart.id) };
   overCol.value = columnAt(e.clientX, e.clientY);
@@ -297,30 +305,32 @@ function onPointerUp(e: PointerEvent) {
   window.removeEventListener('pointermove', onPointerMove);
   window.removeEventListener('pointerup', onPointerUp);
   window.removeEventListener('pointercancel', onPointerUp);
+  window.clearTimeout(holdTimer);
   const start = dragStart;
   dragStart = null;
   const moved = start?.moved ?? false;
+  // A quick press-and-release opens details; a hold or a drag does not.
+  const quickClick =
+    !!start && !moved && !held && Date.now() - start.startedAt <= 250;
   const target = moved ? columnAt(e.clientX, e.clientY) : null;
   clearDragVisuals();
-  if (moved && start) {
-    justDragged = true;
-    window.clearTimeout(justDraggedTimer);
-    justDraggedTimer = window.setTimeout(() => {
-      justDragged = false;
-    }, 500);
-  }
   const current = project.value;
-  if (!moved || !current || !start?.id || !target) return;
-  const task = current.tasks.find((item) => item.id === start.id);
-  if (!task || task.columnId === target) return;
-  board.moveTask(current.id, task.id, target);
+  if (moved && start?.id && target && current) {
+    const task = current.tasks.find((item) => item.id === start.id);
+    if (task && task.columnId !== target) board.moveTask(current.id, task.id, target);
+    return;
+  }
+  if (quickClick && start && current) {
+    const task = current.tasks.find((item) => item.id === start.id);
+    if (task) openDetail(task);
+  }
 }
 
 onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onPointerMove);
   window.removeEventListener('pointerup', onPointerUp);
   window.removeEventListener('pointercancel', onPointerUp);
-  window.clearTimeout(justDraggedTimer);
+  window.clearTimeout(holdTimer);
   clearDragVisuals();
 });
 </script>
@@ -434,10 +444,13 @@ onBeforeUnmount(() => {
               v-for="task in tasksIn(col.id)"
               :key="task.id"
               class="kanban__card"
-              :class="{ 'kanban__card--dragging': dragging === task.id, 'kanban__card--done': task.checked }"
+              :class="{
+                'kanban__card--dragging': dragging === task.id,
+                'kanban__card--pressing': pressingId === task.id,
+                'kanban__card--done': task.checked,
+              }"
               tabindex="0"
               @pointerdown="onCardPointerDown($event, task.id)"
-              @dblclick="openTask(task)"
               @keydown.enter.prevent="openTask(task)"
             >
               <span class="kanban__card-line">
@@ -749,7 +762,7 @@ onBeforeUnmount(() => {
   background: var(--bg);
   color: var(--text);
   text-align: left;
-  cursor: grab;
+  cursor: default;
   touch-action: none;
   /* A card is a drag target, not a text surface: without this a press-drag
      highlights the title instead of moving the card. Inputs inside the edit
@@ -759,6 +772,9 @@ onBeforeUnmount(() => {
 }
 .kanban__card--dragging {
   opacity: 0.35;
+  cursor: grabbing;
+}
+.kanban__card--pressing {
   cursor: grabbing;
 }
 .kanban__card:focus-visible {
