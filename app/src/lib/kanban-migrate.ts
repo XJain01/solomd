@@ -28,11 +28,19 @@ export function projectToMarkdown(project: KanbanBoard['projects'][number]): str
       intro: [],
       cards: project.tasks
         .filter((task) => task.columnId === column.id)
-        .map((task) => ({
-          title: task.title,
-          body: task.notes ? task.notes.split(/\r?\n/) : [],
-          checked: !!task.checked,
-        })),
+        .map((task) => {
+          const body = task.notes ? task.notes.split(/\r?\n/) : [];
+          for (const item of task.checklist ?? []) {
+            body.push(`- [${item.done ? 'x' : ' '}] ${item.text}`);
+          }
+          return {
+            title: task.title,
+            body,
+            checked: !!task.checked,
+            priority: task.priority,
+            due: task.due,
+          };
+        }),
     })),
     archiveRaw: '',
     footerRaw: '',

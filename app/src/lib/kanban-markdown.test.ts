@@ -136,3 +136,17 @@ test('a file without frontmatter or lanes parses as a plain preamble', () => {
   assert.equal(parsed.lanes.length, 0);
   assert.deepEqual(parsed.preamble, ['# Just a note', '', 'some text']);
 });
+
+test('parses and writes Tasks priority and due metadata', () => {
+  const parsed = parseBoardMarkdown(
+    '## Todo\n\n- [ ] Ship it 🔺 📅 2026-10-23\n- [ ] Later 🔼\n',
+  );
+  assert.equal(parsed.lanes[0].cards[0].title, 'Ship it');
+  assert.equal(parsed.lanes[0].cards[0].priority, 'P0');
+  assert.equal(parsed.lanes[0].cards[0].due, '2026-10-23');
+  assert.equal(parsed.lanes[0].cards[1].priority, 'P2');
+
+  const out = serializeBoardMarkdown(parsed);
+  assert.match(out, /- \[ \] Ship it 🔺 📅 2026-10-23/);
+  assert.deepEqual(parseBoardMarkdown(out).lanes, parsed.lanes);
+});

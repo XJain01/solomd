@@ -18,6 +18,8 @@ import {
   renameColumn,
   updateTask,
   type KanbanBoard,
+  type KanbanChecklistItem,
+  type KanbanPriority,
   type KanbanProject,
 } from '../lib/kanban';
 import {
@@ -81,11 +83,20 @@ function boardFromProject(project: StoredProject): MarkdownBoard {
       intro: old?.intro ?? [],
       cards: project.tasks
         .filter((task) => task.columnId === column.id)
-        .map((task) => ({
-          title: task.title,
-          body: task.notes ? task.notes.split(/\r?\n/) : [],
-          checked: !!task.checked,
-        })),
+        .map((task) => {
+          const body = task.notes ? task.notes.split(/\r?\n/) : [];
+          for (const item of task.checklist ?? []) {
+            body.push(`- [${item.done ? 'x' : ' '}] ${item.text}`);
+          }
+          while (body.length && !body[body.length - 1].trim()) body.pop();
+          return {
+            title: task.title,
+            body,
+            checked: !!task.checked,
+            priority: task.priority,
+            due: task.due,
+          };
+        }),
     };
   });
   return {
@@ -110,13 +121,25 @@ function projectFromBoard(
     title: lane.title || `Column ${index + 1}`,
   }));
   const tasks = markdown.lanes.flatMap((lane, laneIndex) =>
-    lane.cards.map((card, cardIndex) => ({
-      id: `task_${laneIndex}_${cardIndex}`,
-      columnId: columns[laneIndex].id,
-      title: card.title,
-      notes: card.body.join('\n'),
-      checked: card.checked,
-    })),
+    lane.cards.map((card, cardIndex) => {
+      const checklist = [];
+      const description = [];
+      for (const line of card.body) {
+        const item = /^-\s*\[([ xX])\]\s?(.*)$/.exec(line.trim());
+        if (item) checklist.push({ text: item[2], done: item[1].toLowerCase() === 'x' });
+        else description.push(line);
+      }
+      return {
+        id: `task_${laneIndex}_${cardIndex}`,
+        columnId: columns[laneIndex].id,
+        title: card.title,
+        notes: description.join('\n'),
+        checked: card.checked,
+        priority: card.priority,
+        due: card.due,
+        checklist,
+      };
+    }),
   );
   return {
     id: filePath,
@@ -369,7 +392,15 @@ export const useKanbanStore = defineStore('taskKanban', {
     updateTask(
       projectId: string,
       taskId: string,
-      patch: { title?: string; notes?: string; columnId?: string; checked?: boolean },
+      patch: {
+        title?: string;
+        notes?: string;
+        columnId?: string;
+        checked?: boolean;
+        priority?: KanbanPriority | null;
+        due?: string | null;
+        checklist?: KanbanChecklistItem[];
+      },
     ) {
       this.apply(updateTask(this.$state, projectId, taskId, patch));
     },

@@ -8,11 +8,17 @@
  * `%% kanban:settings %%` footer.
  */
 
+export type MarkdownPriority = 'P0' | 'P1' | 'P2';
+
 export interface MarkdownCard {
   title: string;
   /** Card body lines, with the 4-space/tab indent stripped. */
   body: string[];
   checked: boolean;
+  /** Stored as Obsidian Tasks priority emoji. */
+  priority?: MarkdownPriority;
+  /** ISO date, stored as `📅`. */
+  due?: string;
 }
 
 export interface MarkdownLane {
@@ -39,6 +45,18 @@ export interface MarkdownBoard {
 const CARD_RE = /^\s{0,3}- \[([ xX])\](?:[ \t]?(.*))?$/;
 const LANE_RE = /^##[ \t]+(.+?)[ \t]*$/;
 const FENCE_RE = /^\s*(```|~~~)/;
+const DUE_RE = /📅\s*(\d{4}-\d{2}-\d{2})/u;
+const PRIORITY_RE = /(🔺|⏫|🔼)/u;
+const PRIORITY_EMOJI: Record<MarkdownPriority, string> = {
+  P0: '🔺',
+  P1: '⏫',
+  P2: '🔼',
+};
+const EMOJI_PRIORITY: Record<string, MarkdownPriority> = {
+  '🔺': 'P0',
+  '⏫': 'P1',
+  '🔼': 'P2',
+};
 
 function splitLines(text: string): string[] {
   return text.split(/\r?\n/);
@@ -121,10 +139,25 @@ export function parseBoardMarkdown(text: string): MarkdownBoard {
     }
     const cardMatch = fence === null ? CARD_RE.exec(line) : null;
     if (cardMatch && lane) {
+      let title = (cardMatch[2] ?? '').trim();
+      let priority: MarkdownPriority | undefined;
+      const priorityMatch = PRIORITY_RE.exec(title);
+      if (priorityMatch) {
+        priority = EMOJI_PRIORITY[priorityMatch[1]];
+        title = title.replace(priorityMatch[0], '');
+      }
+      let due: string | undefined;
+      const dueMatch = DUE_RE.exec(title);
+      if (dueMatch) {
+        due = dueMatch[1];
+        title = title.replace(dueMatch[0], '');
+      }
       lane.cards.push({
-        title: (cardMatch[2] ?? '').trim(),
+        title: title.replace(/\s{2,}/g, ' ').trim(),
         body: [],
         checked: cardMatch[1].toLowerCase() === 'x',
+        priority,
+        due,
       });
       continue;
     }
@@ -181,7 +214,11 @@ export function serializeBoardMarkdown(board: MarkdownBoard): string {
       blank();
     }
     for (const card of lane.cards) {
-      out.push(`- [${card.checked ? 'x' : ' '}] ${card.title}`.trimEnd());
+      const meta: string[] = [];
+      if (card.priority) meta.push(PRIORITY_EMOJI[card.priority]);
+      if (card.due) meta.push(`📅 ${card.due}`);
+      const title = [card.title, ...meta].filter(Boolean).join(' ');
+      out.push(`- [${card.checked ? 'x' : ' '}] ${title}`.trimEnd());
       for (const line of card.body) out.push(indentBodyLine(line));
     }
   }

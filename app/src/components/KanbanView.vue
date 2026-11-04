@@ -10,7 +10,7 @@ import { useI18n } from '../i18n';
 import { useKanbanStore } from '../stores/kanban';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useFiles } from '../composables/useFiles';
-import type { KanbanTask } from '../lib/kanban';
+import type { KanbanChecklistItem, KanbanPriority, KanbanTask } from '../lib/kanban';
 import { KANBAN_CLOSE_EVENT } from '../composables/useKanbanView';
 
 const { t } = useI18n();
@@ -32,9 +32,16 @@ let skipRenameCommit = false;
 const columnDraft = ref('');
 const addingColumn = ref(false);
 const taskDraft = ref<Record<string, string>>({});
-const editingId = ref<string | null>(null);
-const editTitle = ref('');
-const editNotes = ref('');
+
+// Task detail drawer. Edits are local until Save so Cancel is real.
+const detailId = ref<string | null>(null);
+const detailTitle = ref('');
+const detailNotes = ref('');
+const detailPriority = ref<'' | KanbanPriority>('');
+const detailDue = ref('');
+const detailColumnId = ref('');
+const detailChecklist = ref<KanbanChecklistItem[]>([]);
+const checklistDraft = ref('');
 
 const dragging = ref<string | null>(null);
 const overCol = ref<string | null>(null);
@@ -141,6 +148,30 @@ function tasksIn(columnId: string): KanbanTask[] {
   return project.value?.tasks.filter((task) => task.columnId === columnId) ?? [];
 }
 
+/** `## 进行中 (3)` → 3; no suffix → null. */
+function wipLimit(title: string): number | null {
+  const match = /\((\d+)\)\s*$/.exec(title);
+  return match ? Number(match[1]) : null;
+}
+
+function isOverLimit(title: string, count: number): boolean {
+  const limit = wipLimit(title);
+  return limit !== null && count > limit;
+}
+
+function isOverdue(due?: string): boolean {
+  if (!due) return false;
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+    now.getDate(),
+  ).padStart(2, '0')}`;
+  return due < today;
+}
+
+function checklistDone(task: KanbanTask): number {
+  return (task.checklist ?? []).filter((item) => item.done).length;
+}
+
 function addTask(columnId: string) {
   const current = project.value;
   const title = (taskDraft.value[columnId] || '').trim();
@@ -149,34 +180,67 @@ function addTask(columnId: string) {
   taskDraft.value = { ...taskDraft.value, [columnId]: '' };
 }
 
-function openTask(task: KanbanTask) {
+function openDetail(task: KanbanTask) {
   if (justDragged) return;
-  editingId.value = task.id;
-  editTitle.value = task.title;
-  editNotes.value = task.notes;
+  detailId.value = task.id;
+  detailTitle.value = task.title;
+  detailNotes.value = task.notes;
+  detailPriority.value = task.priority ?? '';
+  detailDue.value = task.due ?? '';
+  detailColumnId.value = task.columnId;
+  detailChecklist.value = (task.checklist ?? []).map((item) => ({ ...item }));
+  checklistDraft.value = '';
 }
 
-/** Toggle `[ ]` / `[x]` without opening the editor. */
+function closeDetail() {
+  detailId.value = null;
+  checklistDraft.value = '';
+}
+
+/** Toggle `[ ]` / `[x]` without opening the drawer. */
 function toggleTask(task: KanbanTask) {
   const current = project.value;
   if (!current) return;
   board.updateTask(current.id, task.id, { checked: !task.checked });
 }
 
-function saveTask() {
+function saveDetail() {
   const current = project.value;
-  const id = editingId.value;
-  if (!current || !id) return;
-  board.updateTask(current.id, id, { title: editTitle.value, notes: editNotes.value });
-  editingId.value = null;
+  const id = detailId.value;
+  const title = detailTitle.value.trim();
+  if (!current || !id || !title) return;
+  board.updateTask(current.id, id, {
+    title,
+    notes: detailNotes.value,
+    priority: detailPriority.value || null,
+    due: detailDue.value || null,
+    checklist: detailChecklist.value,
+    columnId: detailColumnId.value,
+  });
+  closeDetail();
 }
 
-function removeTask() {
+function deleteDetail() {
   const current = project.value;
-  const id = editingId.value;
+  const id = detailId.value;
   if (!current || !id) return;
   board.deleteTask(current.id, id);
-  editingId.value = null;
+  closeDetail();
+}
+
+function addChecklistItem() {
+  const text = checklistDraft.value.trim();
+  if (!text) return;
+  detailChecklist.value.push({ text, done: false });
+  checklistDraft.value = '';
+}
+
+function removeChecklistItem(index: number) {
+  detailChecklist.value.splice(index, 1);
+}
+
+function openTask(task: KanbanTask) {
+  openDetail(task);
 }
 
 function columnAt(x: number, y: number): string | null {
@@ -355,7 +419,12 @@ onBeforeUnmount(() => {
               :aria-label="t('kanban.columnName')"
               @change="renameColumn(col.id, ($event.target as HTMLInputElement).value)"
             />
-            <span class="kanban__count">{{ tasksIn(col.id).length }}</span>
+            <span
+              class="kanban__count"
+              :class="{ 'kanban__count--over': isOverLimit(col.title, tasksIn(col.id).length) }"
+            >
+              {{ tasksIn(col.id).length }}<template v-if="wipLimit(col.title) !== null">/{{ wipLimit(col.title) }}</template>
+            </span>
             <button class="kanban__icon" type="button" :title="t('kanban.deleteColumn')" :aria-label="t('kanban.deleteColumn')" @click="removeColumn(col.id)">
               <Icons name="close" :size="14" />
             </button>
@@ -365,48 +434,55 @@ onBeforeUnmount(() => {
               v-for="task in tasksIn(col.id)"
               :key="task.id"
               class="kanban__card"
-              :class="{ 'kanban__card--dragging': dragging === task.id }"
+              :class="{ 'kanban__card--dragging': dragging === task.id, 'kanban__card--done': task.checked }"
               tabindex="0"
               @pointerdown="onCardPointerDown($event, task.id)"
               @dblclick="openTask(task)"
               @keydown.enter.prevent="openTask(task)"
             >
-              <template v-if="editingId === task.id">
-                <input v-model="editTitle" class="kanban__input kanban__card-input" type="text" :placeholder="t('kanban.taskTitle')" @click.stop @pointerdown.stop @keydown.stop />
-                <textarea v-model="editNotes" class="kanban__notes kanban__card-input" rows="3" :placeholder="t('kanban.taskNotes')" @click.stop @pointerdown.stop @keydown.stop />
-                <div class="kanban__card-actions">
-                  <button class="rp-btn" type="button" @click.stop="saveTask">{{ t('kanban.save') }}</button>
-                  <button class="rp-btn" type="button" @click.stop="removeTask">{{ t('kanban.deleteTask') }}</button>
-                  <button class="rp-btn" type="button" @click.stop="editingId = null">{{ t('kanban.cancel') }}</button>
-                </div>
-              </template>
-              <template v-else>
-                <span class="kanban__card-line">
-                  <input
-                    class="kanban__check"
-                    type="checkbox"
-                    :checked="!!task.checked"
-                    :aria-label="t('kanban.taskDone')"
-                    @click.stop
-                    @pointerdown.stop
-                    @change="toggleTask(task)"
-                  />
-                  <span class="kanban__card-title" :class="{ 'kanban__card-title--done': task.checked }">{{ task.title }}</span>
-                </span>
-                <span v-if="task.notes" class="kanban__card-notes">{{ task.notes }}</span>
-                <!-- Deliberate alternative to double-click: a single click here
-                     is unambiguous because it sits on a control, not the card. -->
-                <button
-                  class="kanban__card-edit"
-                  type="button"
-                  :title="t('kanban.editTask')"
-                  :aria-label="t('kanban.editTask')"
-                  @click.stop="openTask(task)"
+              <span class="kanban__card-line">
+                <input
+                  class="kanban__check"
+                  type="checkbox"
+                  :checked="!!task.checked"
+                  :aria-label="t('kanban.taskDone')"
+                  @click.stop
                   @pointerdown.stop
-                >
-                  <Icons name="pencil" :size="13" />
-                </button>
-              </template>
+                  @change="toggleTask(task)"
+                />
+                <span class="kanban__card-title" :class="{ 'kanban__card-title--done': task.checked }">{{ task.title }}</span>
+              </span>
+              <span
+                v-if="task.priority || task.due || (task.checklist && task.checklist.length)"
+                class="kanban__card-meta"
+              >
+                <span
+                  v-if="task.priority"
+                  class="kanban__prio"
+                  :class="`kanban__prio--${task.priority}`"
+                >{{ task.priority }}</span>
+                <span
+                  v-if="task.due"
+                  class="kanban__due"
+                  :class="{ 'kanban__due--overdue': isOverdue(task.due) }"
+                >{{ task.due.slice(5) }}</span>
+                <span v-if="task.checklist && task.checklist.length" class="kanban__progress">
+                  {{ checklistDone(task) }}/{{ task.checklist.length }}
+                </span>
+              </span>
+              <span v-if="task.notes" class="kanban__card-notes">{{ task.notes }}</span>
+              <!-- Opens the detail drawer; a single click on this control is
+                   unambiguous, unlike a click on the card itself. -->
+              <button
+                class="kanban__card-edit"
+                type="button"
+                :title="t('kanban.editTask')"
+                :aria-label="t('kanban.editTask')"
+                @click.stop="openTask(task)"
+                @pointerdown.stop
+              >
+                <Icons name="pencil" :size="13" />
+              </button>
             </article>
             <p v-if="tasksIn(col.id).length === 0" class="kanban__drop">{{ t('kanban.noTasks') }}</p>
           </div>
@@ -444,6 +520,87 @@ onBeforeUnmount(() => {
         :style="{ left: `${ghost.x}px`, top: `${ghost.y}px` }"
         aria-hidden="true"
       >{{ ghost.title }}</div>
+    </Teleport>
+
+    <!-- Task detail drawer. Local edits until Save so Cancel is real. -->
+    <Teleport to="body">
+      <div v-if="detailId" class="kanban__detail-backdrop" @click.self="closeDetail">
+        <aside class="kanban__detail" role="dialog" aria-modal="true">
+          <header class="kanban__detail-head">
+            <h2 class="kanban__detail-title">{{ t('kanban.taskDetails') }}</h2>
+            <button class="kanban__icon" type="button" :aria-label="t('kanban.cancel')" @click="closeDetail">
+              <Icons name="close" :size="14" />
+            </button>
+          </header>
+          <div class="kanban__detail-body">
+            <label class="kanban__field">
+              <span>{{ t('kanban.title') }}</span>
+              <input v-model="detailTitle" class="kanban__input" type="text" />
+            </label>
+            <label class="kanban__field">
+              <span>{{ t('kanban.description') }}</span>
+              <textarea v-model="detailNotes" class="kanban__notes" rows="4" />
+            </label>
+            <div class="kanban__field-row">
+              <label class="kanban__field">
+                <span>{{ t('kanban.priority') }}</span>
+                <select v-model="detailPriority" class="kanban__select">
+                  <option value="">{{ t('kanban.noPriority') }}</option>
+                  <option value="P0">P0</option>
+                  <option value="P1">P1</option>
+                  <option value="P2">P2</option>
+                </select>
+              </label>
+              <label class="kanban__field">
+                <span>{{ t('kanban.status') }}</span>
+                <select v-model="detailColumnId" class="kanban__select">
+                  <option v-for="col in project?.columns || []" :key="col.id" :value="col.id">{{ col.title }}</option>
+                </select>
+              </label>
+            </div>
+            <div class="kanban__field">
+              <span>{{ t('kanban.due') }}</span>
+              <div class="kanban__due-row">
+                <input v-model="detailDue" class="kanban__input" type="date" />
+                <button v-if="detailDue" class="rp-btn rp-btn--sm" type="button" @click="detailDue = ''">
+                  {{ t('kanban.clear') }}
+                </button>
+              </div>
+            </div>
+            <div class="kanban__field">
+              <span>{{ t('kanban.checklist') }}</span>
+              <p v-if="!detailChecklist.length" class="kanban__detail-hint">{{ t('kanban.noChecklist') }}</p>
+              <div v-for="(item, index) in detailChecklist" :key="index" class="kanban__check-row">
+                <input v-model="item.done" type="checkbox" />
+                <input v-model="item.text" class="kanban__input" type="text" />
+                <button
+                  class="kanban__icon"
+                  type="button"
+                  :aria-label="t('kanban.deleteTask')"
+                  @click="removeChecklistItem(index)"
+                >
+                  <Icons name="close" :size="12" />
+                </button>
+              </div>
+              <input
+                v-model="checklistDraft"
+                class="kanban__input"
+                type="text"
+                :placeholder="t('kanban.addChecklistItem')"
+                @keydown.enter.prevent="addChecklistItem"
+              />
+            </div>
+          </div>
+          <footer class="kanban__detail-foot">
+            <button class="rp-btn" type="button" @click="deleteDetail">{{ t('kanban.deleteTask') }}</button>
+            <span class="pg-spacer" />
+            <button class="rp-btn" type="button" @click="closeDetail">{{ t('kanban.cancel') }}</button>
+            <button class="rp-btn" type="button" :disabled="!detailTitle.trim()" @click="saveDetail">
+              {{ t('kanban.save') }}
+            </button>
+          </footer>
+        </aside>
+      </div>
     </Teleport>
   </div>
 </template>
@@ -654,6 +811,89 @@ onBeforeUnmount(() => {
 .kanban__card:hover .kanban__card-edit,
 .kanban__card:focus-within .kanban__card-edit { opacity: 1; }
 .kanban__card-edit:hover { background: var(--fill-2); color: var(--text); }
+.kanban__card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.kanban__prio {
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.kanban__prio--P0 { background: #e5484d; }
+.kanban__prio--P1 { background: #e07b39; }
+.kanban__prio--P2 { background: #5b8def; }
+.kanban__due { font-variant-numeric: tabular-nums; }
+.kanban__due--overdue { color: var(--danger); font-weight: 600; }
+.kanban__progress {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--fill-1);
+  font-variant-numeric: tabular-nums;
+}
+.kanban__count--over { color: var(--danger); font-weight: 700; }
+
+/* Task detail drawer */
+.kanban__detail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.28);
+}
+.kanban__detail {
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  max-width: 100%;
+  height: 100%;
+  background: var(--bg);
+  border-left: var(--bd-hair);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.16);
+}
+.kanban__detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: var(--bd-hair);
+}
+.kanban__detail-title { margin: 0; font-size: 15px; }
+.kanban__detail-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px;
+  overflow: auto;
+}
+.kanban__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.kanban__field-row { display: flex; gap: 12px; }
+.kanban__field-row .kanban__field { flex: 1; min-width: 0; }
+.kanban__due-row { display: flex; align-items: center; gap: 8px; }
+.kanban__detail-hint { margin: 0; font-size: 11px; color: var(--text-3); }
+.kanban__check-row { display: flex; align-items: center; gap: 6px; }
+.kanban__detail-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: var(--bd-hair);
+}
 .kanban__ghost {
   position: fixed;
   z-index: 999;

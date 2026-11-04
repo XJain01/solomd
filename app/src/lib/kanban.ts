@@ -8,6 +8,13 @@ export interface KanbanColumn {
   title: string;
 }
 
+export type KanbanPriority = 'P0' | 'P1' | 'P2';
+
+export interface KanbanChecklistItem {
+  text: string;
+  done: boolean;
+}
+
 export interface KanbanTask {
   id: string;
   columnId: string;
@@ -15,6 +22,12 @@ export interface KanbanTask {
   notes: string;
   /** Markdown `[x]`. Older localStorage boards have no such field. */
   checked?: boolean;
+  /** P0/P1/P2, stored as Obsidian Tasks priority emoji. */
+  priority?: KanbanPriority;
+  /** ISO date (`YYYY-MM-DD`), stored as `📅`. */
+  due?: string;
+  /** Acceptance checklist, stored as indented `- [ ]` body lines. */
+  checklist?: KanbanChecklistItem[];
 }
 
 export interface KanbanProject {
@@ -192,7 +205,15 @@ export function updateTask(
   board: KanbanBoard,
   projectId: string,
   taskId: string,
-  patch: { title?: string; notes?: string; columnId?: string; checked?: boolean },
+  patch: {
+    title?: string;
+    notes?: string;
+    columnId?: string;
+    checked?: boolean;
+    priority?: KanbanPriority | null;
+    due?: string | null;
+    checklist?: KanbanChecklistItem[];
+  },
 ): KanbanBoard {
   return withProject(board, projectId, (p) => ({
     ...p,
@@ -209,6 +230,11 @@ export function updateTask(
         notes: patch.notes !== undefined ? patch.notes : task.notes,
         columnId,
         ...(patch.checked !== undefined ? { checked: patch.checked } : {}),
+        ...(patch.priority !== undefined
+          ? { priority: patch.priority === null ? undefined : patch.priority }
+          : {}),
+        ...(patch.due !== undefined ? { due: patch.due === null ? undefined : patch.due } : {}),
+        ...(patch.checklist !== undefined ? { checklist: patch.checklist } : {}),
       };
     }),
   }));
