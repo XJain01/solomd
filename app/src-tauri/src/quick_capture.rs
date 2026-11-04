@@ -45,7 +45,7 @@ const MOBILE_UNSUPPORTED: &str = "quick capture is desktop-only";
 /// Deliberately small, undecorated and always-on-top: it is a prompt, not a
 /// window you manage. Esc dismisses it (handled in the webview).
 #[tauri::command]
-pub fn quick_capture_open(app: AppHandle) -> Result<(), String> {
+pub async fn quick_capture_open(app: AppHandle) -> Result<(), String> {
     #[cfg(not(desktop))]
     {
         // `show`/`set_focus` and the window builder's `title` are desktop-only
@@ -68,7 +68,10 @@ pub fn quick_capture_open(app: AppHandle) -> Result<(), String> {
         let win = WebviewWindowBuilder::new(
             &app,
             CAPTURE_LABEL,
-            WebviewUrl::App("index.html?quickCapture=1".into()),
+            // No query string: main.ts identifies this window by its label.
+            // A `?quickCapture=1` here is treated as part of the path by
+            // WebviewUrl::App and can load a blank page.
+            WebviewUrl::App("index.html".into()),
         )
         .title("SoloMD — Quick Capture")
         .inner_size(560.0, 180.0)
@@ -245,9 +248,12 @@ pub fn quick_capture_set_shortcut(
                         return;
                     }
                 }
-                if let Err(e) = quick_capture_open(handle.clone()) {
-                    eprintln!("[quick_capture] open failed: {e}");
-                }
+                let app_for_open = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = quick_capture_open(app_for_open).await {
+                        eprintln!("[quick_capture] open failed: {e}");
+                    }
+                });
             })
             .map_err(|e| format!("could not register {accel}: {e}"))?;
         *current = Some(accel);

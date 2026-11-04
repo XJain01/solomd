@@ -17,7 +17,17 @@ const isSlideshow = params.get('slideshow') === '1';
 // separate entry point: it needs the settings and workspace stores (theme,
 // language, current folder) and gets them from the shared localStorage for
 // free this way.
-const isQuickCapture = params.get('quickCapture') === '1';
+//
+// Do NOT rely on the query string alone: Tauri's WebviewUrl::App treats the
+// value as a path, so `index.html?quickCapture=1` can arrive with the `?`
+// encoded and window.location.search empty. The window label is authoritative.
+const tauriWindowLabel = (
+  window as unknown as {
+    __TAURI_INTERNALS__?: { metadata?: { currentWindow?: { label?: string } } };
+  }
+).__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
+const isQuickCapture =
+  params.get('quickCapture') === '1' || tauriWindowLabel === 'solomd-quick-capture';
 
 // Both alternate roots are chosen by a URL param that the main window never
 // carries, so they are loaded on demand — keeping reveal.js and the capture

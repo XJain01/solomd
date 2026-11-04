@@ -280,6 +280,15 @@ async fn handle_eval(req: &Request, app: &AppHandle, port: u16) -> Result<JsonVa
         .ok_or_else(|| "missing field: script".to_string())?
         .to_string();
 
+    // Debug helper: eval in a secondary window (e.g. the quick-capture box)
+    // instead of the main one. Defaults to "main" so existing callers and the
+    // dev-mcp tool are unchanged.
+    let label = parsed
+        .get("label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("main")
+        .to_string();
+
     // Optional explicit timeout, default 5s. We add a small floor so tests
     // can't accidentally time out before the WebView even gets a chance.
     let timeout_ms = parsed
@@ -313,8 +322,8 @@ async fn handle_eval(req: &Request, app: &AppHandle, port: u16) -> Result<JsonVa
     // helped — it didn't, because the same main loop is the one being
     // throttled by AppKit when the window isn't keyWindow.
     let win = app
-        .get_webview_window("main")
-        .ok_or_else(|| "no 'main' webview window".to_string())?;
+        .get_webview_window(&label)
+        .ok_or_else(|| format!("no '{label}' webview window"))?;
     if let Err(e) = win.eval(&wrapped) {
         pending_take(&id);
         return Err(format!("eval: {e}"));
