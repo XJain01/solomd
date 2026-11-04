@@ -121,10 +121,12 @@ jobs:
 
             Fork release on top of v5.1.0 (upstream is at 5.0.13):
 
-            - **Obsidian Callouts** refined — lines stay contiguous when the source has no blank lines, the title is a full-width tint band, and each type gets its own icon (`info` is the circled `i`, not a text glyph)
-            - **智能体 / Agent** is now its own toggle next to the 实时 / 源码 / 分栏 / 预览 switch: opening the chat no longer changes the view mode, and switching modes no longer clears it
-            - **Kanban** is a local task board — multiple projects, editable columns, tasks with optional notes, stored in `localStorage` (`solomd.kanban.v1`). This replaces v5.1.0's frontmatter-driven board, so dragging a card no longer writes note status back
-            - Draft character count sits immediately left of 发送 and grows leftward instead of over the button
+            - **智能体 / Agent 独立分栏** — 聊天不再和右侧只读面板共用一栏，打开时不会再带出大纲 / 反链 / 标签；宽度可拖拽（300–720px），窄屏自动变成全宽抽屉
+            - **Kanban** — 双击卡片编辑、悬停铅笔按钮；拖拽时卡片跟随指针，拖完不会误开编辑；项目名可直接在页头改名（Enter 保存 / Esc 取消）
+            - **OpenCode Go** — 请求补齐 `x-opencode-session`，Key 验证与聊天均可通过；默认模型更新为 `deepseek-v4.1-flash`，模型提示同步当前网关列表
+            - **Obsidian Callouts** — 标题 / 任务列表间距对齐 Obsidian，勾选框不再额外缩进；颜色改用 Obsidian 默认色板（Note 蓝、Tip 青绿等），标题保持通栏
+            - 其余 v5.1.1 内容：Agent 开关独立于视图模式、本地看板、草稿字数位置
+            - **x64 only** — 本次构建只产出 Windows x64（MSI + portable zip）与 Linux x64（deb / AppImage / rpm），不再构建 ARM64
 
             Also in this build: the bundled `solomd-mcp` and its `.mcpb` manifest report the app version again (they had drifted to 5.0.13), and the fork is merged with upstream `main` through v5.0.13.
 
