@@ -1675,6 +1675,16 @@ function onOpenKanban() {
   viewOpen.value = false;
 }
 function onCloseKanban() { kanbanOpen.value = false; }
+// A board is a centre-pane overlay, not a tab. Opening or activating any file
+// must leave it — otherwise every file click keeps showing the board. The
+// tabs store already emits `leave-center-overlay`, but this watch also covers
+// paths that only change the active tab id and never reach that event.
+watch(
+  [() => tabs.activeId, () => tabs.activeTab?.filePath],
+  () => {
+    if (kanbanOpen.value) kanbanOpen.value = false;
+  },
+);
 // v4.6.1 F2 — type lens content swap. Mutually exclusive with the other
 // center-pane overlays (mirrors basesOpen / inboxViewOpen). The open event
 // carries which type to focus; we pass it down as a prop so the view is

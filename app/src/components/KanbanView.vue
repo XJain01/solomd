@@ -196,6 +196,19 @@ function closeDetail() {
   checklistDraft.value = '';
 }
 
+/** Non-modal drawer: a click anywhere outside closes it, without swallowing
+ *  the click that the file tree or another card needs. */
+function onDocumentPointerDown(e: PointerEvent) {
+  const target = e.target as HTMLElement | null;
+  if (target?.closest('.kanban__detail')) return;
+  closeDetail();
+}
+
+watch(detailId, (id) => {
+  if (id) document.addEventListener('pointerdown', onDocumentPointerDown, true);
+  else document.removeEventListener('pointerdown', onDocumentPointerDown, true);
+});
+
 /** Toggle `[ ]` / `[x]` without opening the drawer. */
 function toggleTask(task: KanbanTask) {
   const current = project.value;
@@ -330,6 +343,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onPointerMove);
   window.removeEventListener('pointerup', onPointerUp);
   window.removeEventListener('pointercancel', onPointerUp);
+  document.removeEventListener('pointerdown', onDocumentPointerDown, true);
   window.clearTimeout(holdTimer);
   clearDragVisuals();
 });
@@ -535,11 +549,18 @@ onBeforeUnmount(() => {
       >{{ ghost.title }}</div>
     </Teleport>
 
-    <!-- Task detail drawer. Local edits until Save so Cancel is real. -->
+    <!-- Task detail drawer. Local edits until Save so Cancel is real. It is
+         deliberately non-modal: a click on the file tree or another card still
+         does its normal job instead of being eaten by a scrim. -->
     <Teleport to="body">
-      <div v-if="detailId" class="kanban__detail-backdrop" @click.self="closeDetail">
-        <aside class="kanban__detail" role="dialog" aria-modal="true">
-          <header class="kanban__detail-head">
+      <aside
+        v-if="detailId"
+        class="kanban__detail"
+        role="dialog"
+        aria-modal="false"
+        @pointerdown.stop
+      >
+        <header class="kanban__detail-head">
             <h2 class="kanban__detail-title">{{ t('kanban.taskDetails') }}</h2>
             <button class="kanban__icon" type="button" :aria-label="t('kanban.cancel')" @click="closeDetail">
               <Icons name="close" :size="14" />
@@ -613,7 +634,6 @@ onBeforeUnmount(() => {
             </button>
           </footer>
         </aside>
-      </div>
     </Teleport>
   </div>
 </template>
@@ -856,21 +876,18 @@ onBeforeUnmount(() => {
 }
 .kanban__count--over { color: var(--danger); font-weight: 700; }
 
-/* Task detail drawer */
-.kanban__detail-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-  display: flex;
-  justify-content: flex-end;
-  background: rgba(0, 0, 0, 0.28);
-}
+/* Task detail drawer — fixed to the right edge, no scrim, so the file tree
+   and the board stay clickable underneath. */
 .kanban__detail {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 90;
   display: flex;
   flex-direction: column;
   width: 360px;
   max-width: 100%;
-  height: 100%;
   background: var(--bg);
   border-left: var(--bd-hair);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.16);
