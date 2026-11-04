@@ -173,6 +173,12 @@ function checklistDone(task: KanbanTask): number {
   return (task.checklist ?? []).filter((item) => item.done).length;
 }
 
+function checklistPercent(task: KanbanTask): number {
+  const total = task.checklist?.length ?? 0;
+  if (!total) return 0;
+  return Math.round((checklistDone(task) / total) * 100);
+}
+
 function addTask(columnId: string) {
   const current = project.value;
   const title = (taskDraft.value[columnId] || '').trim();
@@ -479,9 +485,22 @@ onBeforeUnmount(() => {
                   :class="{ 'kanban__due--overdue': isOverdue(task.due) }"
                 >{{ task.due.slice(5) }}</span>
                 <span v-if="task.checklist && task.checklist.length" class="kanban__progress">
-                  {{ checklistDone(task) }}/{{ task.checklist.length }}
+                  <Icons name="check" :size="10" /> {{ checklistDone(task) }}/{{ task.checklist.length }}
                 </span>
               </span>
+              <div
+                v-if="task.checklist && task.checklist.length"
+                class="kanban__progressbar"
+                role="progressbar"
+                :aria-valuenow="checklistDone(task)"
+                aria-valuemin="0"
+                :aria-valuemax="task.checklist.length"
+              >
+                <span
+                  class="kanban__progressbar-fill"
+                  :style="{ width: `${checklistPercent(task)}%` }"
+                />
+              </div>
               <span v-if="task.notes" class="kanban__card-notes">{{ task.notes }}</span>
               <!-- Opens the detail drawer; a single click on this control is
                    unambiguous, unlike a click on the card itself. -->
@@ -852,10 +871,28 @@ onBeforeUnmount(() => {
 .kanban__due { font-variant-numeric: tabular-nums; }
 .kanban__due--overdue { color: var(--danger); font-weight: 600; }
 .kanban__progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   padding: 0 4px;
   border-radius: 4px;
   background: var(--fill-1);
   font-variant-numeric: tabular-nums;
+}
+.kanban__progressbar {
+  width: 100%;
+  height: 4px;
+  margin-top: 2px;
+  border-radius: 999px;
+  background: var(--fill-2);
+  overflow: hidden;
+}
+.kanban__progressbar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 180ms var(--ease);
 }
 .kanban__count--over { color: var(--danger); font-weight: 700; }
 
