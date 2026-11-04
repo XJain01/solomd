@@ -2,8 +2,8 @@ name: Release SoloMD
 
 # Trigger: push a tag that starts with `v`, e.g.
 #   git tag v0.1.0 && git push --tags
-# This kicks off a matrix build across macOS / Windows / Linux and uploads
-# the bundles to a draft GitHub Release named after the tag. The release
+# This kicks off a matrix build for the x64 targets (Windows / Linux) and
+# uploads the bundles to a draft GitHub Release named after the tag. The release
 # stays a draft so you can review the artifacts before flipping the
 # "Publish" switch.
 on:
@@ -20,26 +20,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # x64 only. ARM64 jobs (windows-11-arm / ubuntu-22.04-arm) were
+          # removed on 2026-11-04 — do not add them back without asking.
           # Windows x64
           - platform: windows-latest
             # MSI is the single supported installed channel. A portable ZIP is
             # packed below for users who do not want an installation.
             args: '--bundles msi'
             rust_targets: ''
-          # Windows ARM64 — for Snapdragon X / Copilot+ PCs and Apple Silicon
-          # Macs running Windows 11 ARM in a VM. Native build avoids the x64
-          # emulation layer Windows-on-ARM would otherwise use.
-          - platform: windows-11-arm
-            args: '--bundles msi'
-            rust_targets: ''
           # Linux x64 (.deb / .AppImage / .rpm)
           - platform: ubuntu-22.04
-            args: '--bundles appimage,deb,rpm'
-            rust_targets: ''
-          # Linux ARM64 — for Raspberry Pi 4/5, Mac users running Linux VMs,
-          # Ampere servers, and ARM Chromebooks.
-          # Cross-compiled from x86_64 runner via aarch64 toolchain.
-          - platform: ubuntu-22.04-arm
             args: '--bundles appimage,deb,rpm'
             rust_targets: ''
           # NOTE: macOS removed from CI matrix.
@@ -181,7 +171,7 @@ jobs:
       # VirusTotal instead — it's cross-platform and covers Microsoft's engine.
       # ----------------------------------------------------------------------
       - name: Scan Windows bundles with Defender
-        if: matrix.platform == 'windows-latest' || matrix.platform == 'windows-11-arm'
+        if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
           $plat = Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform" -Directory -ErrorAction SilentlyContinue |
@@ -239,7 +229,6 @@ jobs:
       # can `curl install-mcp.sh | bash` and get the matched build.
       #
       # Linux x64:    solomd-mcp-linux-x64.tar.gz
-      # Linux arm64:  solomd-mcp-linux-arm64.tar.gz
       # Windows x64:  solomd-mcp-win-x64.zip
       # macOS:        produced locally via scripts/build-mac.sh, since
       #               macOS isn't in this matrix anymore.
@@ -288,8 +277,7 @@ jobs:
           set -euo pipefail
           # Map runner -> arch label install-mcp.sh expects.
           case "${{ matrix.platform }}" in
-            ubuntu-22.04-arm) ARCH="arm64" ;;
-            ubuntu-22.04)     ARCH="x64" ;;
+            ubuntu-22.04) ARCH="x64" ;;
             *) echo "unknown linux runner: ${{ matrix.platform }}"; exit 1 ;;
           esac
           ASSET="solomd-mcp-linux-${ARCH}.tar.gz"
@@ -317,14 +305,13 @@ jobs:
       # Also packs solomd-mcp.exe into a separate `.zip` for `install-mcp.sh`.
       # ----------------------------------------------------------------------
       - name: Build Windows portable .zip
-        if: matrix.platform == 'windows-latest' || matrix.platform == 'windows-11-arm'
+        if: matrix.platform == 'windows-latest'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Architecture suffix matches what tauri-action picks for installer
-          # names (x64 vs arm64). install-mcp.sh expects the matching mcp zip.
-          $arch = if ("${{ matrix.platform }}" -eq "windows-11-arm") { "arm64" } else { "x64" }
+          # x64 is the only Windows build in this matrix.
+          $arch = "x64"
           $version = (Get-Content app/package.json -Raw | ConvertFrom-Json).version
           $exe = "app/src-tauri/target/release/SoloMD.exe"
           if (-Not (Test-Path $exe)) {
@@ -384,8 +371,7 @@ jobs:
         run: |
           set -euo pipefail
           case "${{ matrix.platform }}" in
-            ubuntu-22.04-arm) ARCH="arm64" ;;
-            ubuntu-22.04)     ARCH="x64" ;;
+            ubuntu-22.04) ARCH="x64" ;;
           esac
           ASSET="solomd-mcp-linux-${ARCH}.tar.gz"
           export LOCAL_TARBALL="$PWD/$ASSET"
