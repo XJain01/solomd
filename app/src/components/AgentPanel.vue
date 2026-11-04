@@ -19,6 +19,7 @@ import { useToastsStore } from '../stores/toasts';
 import { useWorkspaceIndexStore } from '../stores/workspaceIndex';
 import { useAgentPanelStore } from '../stores/agentPanel';
 import { buildAgentFeed } from '../lib/agent-feed';
+import { composeAgentSystemPrompt } from '../lib/agent-prompt';
 import { providerById, type ProviderId } from '../lib/ai-providers';
 import { parseWithWikilinks, chipLabel } from '../lib/wikilinks';
 import { useFiles } from '../composables/useFiles';
@@ -79,20 +80,10 @@ watch(includeActiveNote, (v) => {
 const ACTIVE_NOTE_CHAR_LIMIT = 8192;
 
 /**
- * Default system prompt the panel injects before each chat. Kept generic
- * here; the next commit on `feat/v4-panel` adds vault-aware context (RAG
- * snippets + active note path) before the user's message.
+ * There is no built-in system prompt. The user owns the agent's instructions:
+ * Settings → AI → Agent holds a global prompt for every conversation, and the
+ * per-conversation persona is appended on top. Both are composed in `send()`.
  */
-const SYSTEM_PROMPT =
-  'You are an autonomous writing and research agent inside SoloMD, a local-first markdown editor. ' +
-  'You can call tools to list, search, read, and (when enabled) write notes in the user’s vault. ' +
-  'Act instead of asking: when you need to know which note, folder, heading, or tag the user means, ' +
-  'use list_notes / search / read_note to find it; never ask the user for information a tool can retrieve. ' +
-  'Keep working until the task is complete: do not stop after one step to report progress or ask for permission, ' +
-  'and do not hand work back because a detail is uncertain — make the smallest reasonable assumption, state it, and continue. ' +
-  'Ask a question only when the request is genuinely ambiguous or the next action would be destructive, and then ask at most one. ' +
-  'When you finish, summarize what you changed and what (if anything) still needs the user. ' +
-  'Be concise and accurate; use markdown formatting when helpful.';
 
 /**
  * Build a workspace-context system message describing where the user is.
@@ -226,11 +217,15 @@ async function send() {
 
   const ctx = buildVaultContext();
   const noteCtx = buildActiveNoteContext();
-  const systemParts = [SYSTEM_PROMPT];
-  if (ctx) systemParts.push(ctx);
-  if (noteCtx) systemParts.push(noteCtx);
+  const persona = settings.agentPersonas.find((p) => p.id === settings.agentPersonaId) ?? null;
+  const system = composeAgentSystemPrompt({
+    globalPrompt: settings.agentSystemPrompt,
+    persona,
+    vaultContext: ctx,
+    noteContext: noteCtx,
+  });
   const messages = [
-    { role: 'system', content: systemParts.join('\n\n') },
+    ...(system ? [{ role: 'system', content: system }] : []),
     ...history,
   ];
 
@@ -523,6 +518,23 @@ watch(stateKey, (k) => {
       </button>
     </header>
 
+    <!-- Persona switcher. Applies from the next message; the history above is
+         untouched. Hidden when no personas exist (Settings → AI → Agent). -->
+    <div v-if="stateKey === 'ready' && settings.agentPersonas.length" class="agent-panel__persona">
+      <span class="agent-panel__persona-label">{{ t('agent.persona') }}</span>
+      <select
+        class="agent-panel__persona-select"
+        :value="settings.agentPersonaId"
+        :aria-label="t('agent.persona')"
+        @change="settings.setAgentPersonaId(($event.target as HTMLSelectElement).value)"
+      >
+        <option value="">{{ t('agent.personaNone') }}</option>
+        <option v-for="persona in settings.agentPersonas" :key="persona.id" :value="persona.id">
+          {{ persona.name || t('agent.personaUntitled') }}
+        </option>
+      </select>
+    </div>
+
     <div v-if="stateKey === 'no-folder'" class="rp-empty agent-panel__empty">
       {{ t('agent.empty.noFolder') }}
     </div>
@@ -726,6 +738,36 @@ watch(stateKey, (k) => {
 }
 .agent-panel__spacer {
   flex: 1 1 auto;
+}
+/* Persona switcher row — sits between the header and the message list. */
+.agent-panel__persona {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: var(--bd-hair);
+  background: var(--bg-elev);
+}
+.agent-panel__persona-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.agent-panel__persona-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  border: var(--bd-hair);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.agent-panel__persona-select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-ring);
 }
 .agent-panel__chip {
   margin-right: 2px;

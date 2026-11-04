@@ -40,3 +40,24 @@ test('an untouched 8-turn agent cap migrates to 20, an explicit choice does not'
   setActivePinia(createPinia());
   assert.equal(useSettingsStore().agentToolLoopCap, 6);
 });
+
+test('agent personas can be added, edited, selected, and removed', () => {
+  storage.set('solomd.settings.v1', JSON.stringify({}));
+  setActivePinia(createPinia());
+  const settings = useSettingsStore();
+
+  settings.addAgentPersona('Editor');
+  assert.equal(settings.agentPersonas.length, 1);
+  const id = settings.agentPersonas[0].id;
+  assert.equal(settings.agentPersonas[0].name, 'Editor');
+
+  settings.updateAgentPersona(id, { prompt: 'Be terse.' });
+  assert.equal(settings.agentPersonas[0].prompt, 'Be terse.');
+
+  settings.setAgentPersonaId(id);
+  assert.equal(settings.agentPersonaId, id);
+
+  settings.removeAgentPersona(id);
+  assert.equal(settings.agentPersonas.length, 0);
+  assert.equal(settings.agentPersonaId, '');
+});

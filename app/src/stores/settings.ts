@@ -11,6 +11,11 @@ import {
 
 const LS_KEY = 'solomd.settings.v1';
 
+function newAgentPersonaId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return `persona-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 // CJK + generic fallback appended after the user's chosen face. This way
 // Latin glyphs come from the user's pick while CJK still falls back to
 // a real CJK font instead of whatever the generic `monospace` happens to be.
@@ -42,6 +47,14 @@ export function buildEditorFontStack(face: string): string {
  *  so the picker shows it selected) — SF Pro + PingFang on Apple, Segoe UI +
  *  YaHei on Windows via buildEditorFontStack's CJK tail. */
 export const DEFAULT_EDITOR_FONT = '-apple-system, "Segoe UI", system-ui, sans-serif';
+
+/** A user-defined agent persona: a name shown in the sidebar + the extra
+ *  system-prompt text appended while it is active. */
+export interface AgentPersona {
+  id: string;
+  name: string;
+  prompt: string;
+}
 
 interface Settings {
   theme: Theme;
@@ -238,6 +251,14 @@ interface Settings {
   agentToolLoopCap: number;
   /** One-time marker: old installs stored the 8-turn default explicitly. */
   agentToolLoopCapRaised: boolean;
+  /** Global system prompt prepended to every agent conversation. Empty is
+   *  fine — the built-in prompt was removed so the user owns this text. */
+  agentSystemPrompt: string;
+  /** User-created personas offered in the agent sidebar. */
+  agentPersonas: AgentPersona[];
+  /** Persona active in the current conversation; empty = none. Switching it
+   *  changes the next request, not the messages already exchanged. */
+  agentPersonaId: string;
   // Width (in px) of the right/left side sidebar that hosts Outline /
   // Backlinks / Tags / History. User-resizable via the drag handle.
   sideSidebarWidth: number;
@@ -758,6 +779,9 @@ function defaults(): Settings {
     agentAllowWrite: false,
     agentToolLoopCap: 20,
     agentToolLoopCapRaised: true,
+    agentSystemPrompt: '',
+    agentPersonas: [],
+    agentPersonaId: '',
     sideSidebarWidth: 260,
     agentDockWidth: 440,
     fileTreeWidth: 260,
@@ -1050,6 +1074,21 @@ function load(): Settings {
       if (!parsed.agentToolLoopCapRaised) {
         if (merged.agentToolLoopCap === 8) merged.agentToolLoopCap = 20;
         merged.agentToolLoopCapRaised = true;
+      }
+      // 5.1.3 — agent personas. A corrupt or legacy blob just means no
+      // personas; never throw away the rest of the settings over it.
+      if (!Array.isArray(merged.agentPersonas)) merged.agentPersonas = [];
+      merged.agentPersonas = merged.agentPersonas
+        .filter((p) => p && typeof p === 'object')
+        .map((p) => ({
+          id: String(p.id || ''),
+          name: String(p.name || ''),
+          prompt: String(p.prompt || ''),
+        }))
+        .filter((p) => p.id);
+      if (typeof merged.agentSystemPrompt !== 'string') merged.agentSystemPrompt = '';
+      if (!merged.agentPersonas.some((p) => p.id === merged.agentPersonaId)) {
+        merged.agentPersonaId = '';
       }
       // D6 — a theme outside the built-in list (e.g. a hand-edited or
       // MCP-written 'system') rendered as a bare white page; reset it to the
@@ -1547,6 +1586,37 @@ export const useSettingsStore = defineStore('settings', {
     setAgentToolLoopCap(n: number) {
       const clean = Math.max(1, Math.min(20, Math.round(n) || 20));
       this.agentToolLoopCap = clean;
+      this.persist();
+    },
+    /** Global system prompt appended to every agent conversation. */
+    setAgentSystemPrompt(text: string) {
+      this.agentSystemPrompt = text;
+      this.persist();
+    },
+    /** Choose the persona for the current conversation. An unknown id
+     *  (deleted persona from another window) degrades to "none". */
+    setAgentPersonaId(id: string) {
+      this.agentPersonaId = this.agentPersonas.some((p) => p.id === id) ? id : '';
+      this.persist();
+    },
+    addAgentPersona(name: string) {
+      this.agentPersonas.push({
+        id: newAgentPersonaId(),
+        name: name.trim() || 'Persona',
+        prompt: '',
+      });
+      this.persist();
+    },
+    updateAgentPersona(id: string, patch: Partial<Pick<AgentPersona, 'name' | 'prompt'>>) {
+      const persona = this.agentPersonas.find((p) => p.id === id);
+      if (!persona) return;
+      if (patch.name !== undefined) persona.name = patch.name;
+      if (patch.prompt !== undefined) persona.prompt = patch.prompt;
+      this.persist();
+    },
+    removeAgentPersona(id: string) {
+      this.agentPersonas = this.agentPersonas.filter((p) => p.id !== id);
+      if (this.agentPersonaId === id) this.agentPersonaId = '';
       this.persist();
     },
     setSideSidebarWidth(w: number) {

@@ -1027,6 +1027,54 @@ function onProviderChange(ev: Event): void {
         <span class="ai-settings__hint">{{ t('agentSettings.loopCapHint') }}</span>
       </div>
 
+      <div class="ai-settings__row ai-settings__row--column">
+        <label class="ai-settings__label" for="agent-system-prompt">{{ t('agentSettings.systemPrompt') }}</label>
+        <textarea
+          id="agent-system-prompt"
+          class="ai-settings__input ai-settings__textarea"
+          rows="4"
+          :value="settingsStore.agentSystemPrompt"
+          @change="settingsStore.setAgentSystemPrompt(($event.target as HTMLTextAreaElement).value)"
+        />
+        <span class="ai-settings__hint">{{ t('agentSettings.systemPromptHint') }}</span>
+      </div>
+
+      <div class="ai-settings__row ai-settings__row--column">
+        <span class="ai-settings__label">{{ t('agentSettings.personas') }}</span>
+        <span class="ai-settings__hint">{{ t('agentSettings.personasHint') }}</span>
+        <div
+          v-for="persona in settingsStore.agentPersonas"
+          :key="persona.id"
+          class="ai-settings__persona"
+        >
+          <div class="ai-settings__persona-head">
+            <input
+              class="ai-settings__input"
+              :value="persona.name"
+              :placeholder="t('agentSettings.personaName')"
+              @change="settingsStore.updateAgentPersona(persona.id, { name: ($event.target as HTMLInputElement).value })"
+            />
+            <button
+              class="rp-btn rp-btn--sm rp-btn--ghost"
+              type="button"
+              @click="settingsStore.removeAgentPersona(persona.id)"
+            >{{ t('agentSettings.deletePersona') }}</button>
+          </div>
+          <textarea
+            class="ai-settings__input ai-settings__textarea"
+            rows="3"
+            :value="persona.prompt"
+            :placeholder="t('agentSettings.personaPrompt')"
+            @change="settingsStore.updateAgentPersona(persona.id, { prompt: ($event.target as HTMLTextAreaElement).value })"
+          />
+        </div>
+        <button
+          class="rp-btn rp-btn--sm"
+          type="button"
+          @click="settingsStore.addAgentPersona(t('agentSettings.newPersonaName'))"
+        >{{ t('agentSettings.addPersona') }}</button>
+      </div>
+
       <div class="ai-settings__row ai-settings__row--block">
         <span class="ai-settings__label">{{ t('agentSettings.recentRuns') }}</span>
         <div class="ai-settings__runs">
@@ -1212,6 +1260,32 @@ select.ai-settings__input {
 }
 .ai-settings__row--block {
   align-items: flex-start;
+}
+.ai-settings__row--column {
+  flex-direction: column;
+  align-items: stretch;
+}
+.ai-settings__textarea {
+  min-height: 72px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+}
+.ai-settings__persona {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+}
+.ai-settings__persona-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .ai-settings__input--narrow {
   flex: 0 0 80px;

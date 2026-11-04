@@ -1953,6 +1953,17 @@ export const nl: I18n = {
 
   // v4.0 pillar 1: Agent settings (under AI settings)
   agentSettings: {
+    systemPrompt: 'Global system prompt',
+    systemPromptHint:
+      "Added to every agent conversation. There is no built-in prompt — write the agent's rules here.",
+    personas: 'Personas',
+    personasHint:
+      'Create named prompts, then pick one in the agent sidebar. The active persona is appended after the global prompt and only affects the current conversation.',
+    addPersona: 'Add persona',
+    deletePersona: 'Delete',
+    personaName: 'Persona name',
+    personaPrompt: 'Persona instructions',
+    newPersonaName: 'New persona',
     heading: 'Agent (chat-tools + schrijftoegang)',
     allowWrite: 'Agent toestaan naar vault te schrijven',
     allowWriteHint:
@@ -1968,6 +1979,9 @@ export const nl: I18n = {
 
   // v4.0 pillar 1: Inline Agent Panel
   agent: {
+    persona: 'Persona',
+    personaNone: 'No persona',
+    personaUntitled: 'Untitled persona',
     toolsUsed: 'Tools × {n}',
     heading: 'Agent',
     empty: {

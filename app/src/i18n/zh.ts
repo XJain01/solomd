@@ -1944,6 +1944,17 @@ export const zh: I18n = {
     allowWrite: '允许智能体写入 vault',
     allowWriteHint:
       '默认关闭。开启后，智能体可在对话中调用 write_note / append_to_note。只读工具（list / read / search / backlinks / tags / outline / autogit log/diff）不受此开关影响。',
+    systemPrompt: '全局系统提示词',
+    systemPromptHint:
+      '会追加到所有智能体会话。没有内置提示词，智能体的规则全部由你在这里定义。',
+    personas: '人格',
+    personasHint:
+      '创建带名字的提示词，然后在智能体侧栏选择。当前生效的人格会追加在全局提示词之后，只作用于当前对话。',
+    addPersona: '新建人格',
+    deletePersona: '删除',
+    personaName: '人格名称',
+    personaPrompt: '人格提示词',
+    newPersonaName: '新人格',
     loopCap: '工具循环上限',
     loopCapHint: '每轮对话允许的 LLM ↔ 工具往返次数（1–20）。默认 20。',
     recentRuns: '最近运行',
@@ -1957,6 +1968,9 @@ export const zh: I18n = {
   agent: {
     heading: '智能体',
     toolsUsed: '工具调用 × {n}',
+    persona: '人格',
+    personaNone: '不使用人格',
+    personaUntitled: '未命名人格',
     empty: {
       noFolder: '请先打开一个文件夹，再开始与笔记库对话。',
       noAi: '请先在设置里配置一个 AI 服务商。',

@@ -1940,6 +1940,17 @@ export const pt: I18n = {
     dateBefore: 'Antes (incluído)',
   },
   agentSettings: {
+    systemPrompt: 'Global system prompt',
+    systemPromptHint:
+      "Added to every agent conversation. There is no built-in prompt — write the agent's rules here.",
+    personas: 'Personas',
+    personasHint:
+      'Create named prompts, then pick one in the agent sidebar. The active persona is appended after the global prompt and only affects the current conversation.',
+    addPersona: 'Add persona',
+    deletePersona: 'Delete',
+    personaName: 'Persona name',
+    personaPrompt: 'Persona instructions',
+    newPersonaName: 'New persona',
     heading: 'Agente (ferramentas de chat + acesso de escrita)',
     allowWrite: 'Permitir que o agente escreva no vault',
     allowWriteHint:
@@ -1953,6 +1964,9 @@ export const pt: I18n = {
     refresh: 'Atualizar',
   },
   agent: {
+    persona: 'Persona',
+    personaNone: 'No persona',
+    personaUntitled: 'Untitled persona',
     toolsUsed: 'Tools × {n}',
     heading: 'Agente',
     empty: {

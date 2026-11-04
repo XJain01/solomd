@@ -1967,6 +1967,17 @@ export const en = {
     allowWrite: 'Allow agent to write to vault',
     allowWriteHint:
       'Off by default. When on, the agent can call write_note / append_to_note from chat. Read-only tools (list, read, search, backlinks, tags, outline, autogit log/diff) work either way.',
+    systemPrompt: 'Global system prompt',
+    systemPromptHint:
+      'Added to every agent conversation. There is no built-in prompt — write the agent\'s rules here.',
+    personas: 'Personas',
+    personasHint:
+      'Create named prompts, then pick one in the agent sidebar. The active persona is appended after the global prompt and only affects the current conversation.',
+    addPersona: 'Add persona',
+    deletePersona: 'Delete',
+    personaName: 'Persona name',
+    personaPrompt: 'Persona instructions',
+    newPersonaName: 'New persona',
     loopCap: 'Tool loop cap',
     loopCapHint: 'Max LLM ↔ tool round-trips per chat turn (1–20). Default 20.',
     recentRuns: 'Recent runs',
@@ -1980,6 +1991,9 @@ export const en = {
   agent: {
     heading: 'Agent',
     toolsUsed: 'Tools × {n}',
+    persona: 'Persona',
+    personaNone: 'No persona',
+    personaUntitled: 'Untitled persona',
     empty: {
       noFolder: 'Open a folder to chat with your vault.',
       noAi: 'Configure an AI provider to start chatting.',

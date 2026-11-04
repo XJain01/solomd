@@ -1930,6 +1930,17 @@ export const ru: I18n = {
     dateBefore: 'До (включительно)',
   },
   agentSettings: {
+    systemPrompt: 'Global system prompt',
+    systemPromptHint:
+      "Added to every agent conversation. There is no built-in prompt — write the agent's rules here.",
+    personas: 'Personas',
+    personasHint:
+      'Create named prompts, then pick one in the agent sidebar. The active persona is appended after the global prompt and only affects the current conversation.',
+    addPersona: 'Add persona',
+    deletePersona: 'Delete',
+    personaName: 'Persona name',
+    personaPrompt: 'Persona instructions',
+    newPersonaName: 'New persona',
     heading: 'Агент (инструменты чата + доступ на запись)',
     allowWrite: 'Разрешить агенту запись в хранилище',
     allowWriteHint:
@@ -1943,6 +1954,9 @@ export const ru: I18n = {
     refresh: 'Обновить',
   },
   agent: {
+    persona: 'Persona',
+    personaNone: 'No persona',
+    personaUntitled: 'Untitled persona',
     toolsUsed: 'Tools × {n}',
     heading: 'Агент',
     empty: {

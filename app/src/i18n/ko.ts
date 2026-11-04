@@ -1938,6 +1938,17 @@ export const ko: I18n = {
     dateBefore: '이전(포함)',
   },
   agentSettings: {
+    systemPrompt: 'Global system prompt',
+    systemPromptHint:
+      "Added to every agent conversation. There is no built-in prompt — write the agent's rules here.",
+    personas: 'Personas',
+    personasHint:
+      'Create named prompts, then pick one in the agent sidebar. The active persona is appended after the global prompt and only affects the current conversation.',
+    addPersona: 'Add persona',
+    deletePersona: 'Delete',
+    personaName: 'Persona name',
+    personaPrompt: 'Persona instructions',
+    newPersonaName: 'New persona',
     heading: 'Agent(채팅 도구 + 쓰기 액세스)',
     allowWrite: 'Agent의 vault 쓰기 허용',
     allowWriteHint:
@@ -1951,6 +1962,9 @@ export const ko: I18n = {
     refresh: '새로고침',
   },
   agent: {
+    persona: 'Persona',
+    personaNone: 'No persona',
+    personaUntitled: 'Untitled persona',
     toolsUsed: 'Tools × {n}',
     heading: 'Agent',
     empty: {

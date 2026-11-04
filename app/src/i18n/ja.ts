@@ -1938,6 +1938,17 @@ export const ja: I18n = {
     dateBefore: '以前（含む）',
   },
   agentSettings: {
+    systemPrompt: 'Global system prompt',
+    systemPromptHint:
+      "Added to every agent conversation. There is no built-in prompt — write the agent's rules here.",
+    personas: 'Personas',
+    personasHint:
+      'Create named prompts, then pick one in the agent sidebar. The active persona is appended after the global prompt and only affects the current conversation.',
+    addPersona: 'Add persona',
+    deletePersona: 'Delete',
+    personaName: 'Persona name',
+    personaPrompt: 'Persona instructions',
+    newPersonaName: 'New persona',
     heading: 'Agent（チャットツール + 書き込みアクセス）',
     allowWrite: 'Agent に vault への書き込みを許可',
     allowWriteHint:
@@ -1951,6 +1962,9 @@ export const ja: I18n = {
     refresh: '更新',
   },
   agent: {
+    persona: 'Persona',
+    personaNone: 'No persona',
+    personaUntitled: 'Untitled persona',
     toolsUsed: 'Tools × {n}',
     heading: 'Agent',
     empty: {
