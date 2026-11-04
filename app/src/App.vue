@@ -253,7 +253,6 @@ function rsPaneSnapshot() {
     showNeighborhood: settings.showNeighborhood,
     showTypesPanel: settings.showTypesPanel,
     showHistoryPanel: settings.showHistoryPanel,
-    showAgentPanel: settings.showAgentPanel,
   };
 }
 /** Run a pane toggle and reconcile sidebar visibility: hide it if the
@@ -270,8 +269,7 @@ function ctxToggle(toggleFn: () => void) {
     !settings.showTasksPanel &&
     !showNeighborhoodPane.value &&
     !settings.showTypesPanel &&
-    !settings.showHistoryPanel &&
-    !settings.showAgentPanel;
+    !settings.showHistoryPanel;
   if (noPanesVisible) {
     settings.hideRightSidebarFromPane(before);
   } else if (settings.rightSidebarHidden) {
@@ -2060,9 +2058,16 @@ const rightSidebarHasRenderablePane = computed(
     showNeighborhoodPane.value ||
     showTypesPane.value ||
     showHistoryPane.value ||
-    showInspectorPane.value ||
-    (!IS_APP_STORE_BUILD && settings.showAgentPanel),
+    showInspectorPane.value,
 );
+
+/**
+ * The agent chat is its own dock, not a pane of the read-only strip. It used
+ * to live in `rsPaneOrder`, which meant opening the chat also pulled backlinks,
+ * tags, outline and everything else the strip happens to have switched on —
+ * the "侧栏乱起八糟的内容都带进来" report. The dock only ever contains the chat.
+ */
+const showAgentDock = computed(() => !IS_APP_STORE_BUILD && settings.showAgentPanel);
 
 const showRightSidebar = computed(() => {
   // Master "hide" toggle wins over individual panes — preserves which panes
@@ -2103,7 +2108,7 @@ const narrowDrawer = computed<'left' | 'right' | null>(() => {
   // and the sidebar is not rendered there at all. `showFileTree` (on by
   // default) still read as an open drawer, so the editor sat under the
   // scrim, dimmed, with the first tap spent dismissing nothing.
-  if (showRightSidebar.value) return 'right';
+  if (showRightSidebar.value || showAgentDock.value) return 'right';
   return null;
 });
 
@@ -2112,6 +2117,7 @@ function closeNarrowDrawer(): void {
   if (settings.showFileTree) settings.toggleFileTree();
   if (settings.showViewsPanel) settings.toggleViewsPanel();
   if (showRightSidebar.value) settings.toggleRightSidebar();
+  if (showAgentDock.value) settings.toggleAgentPanel();
 }
 
 // v4.0.2 — ordered list of currently-visible right-sidebar panes. Drives
@@ -2122,7 +2128,7 @@ const visibleRsPanes = computed(() => {
   // v4.3.0 issue #57b — order driven by settings.rsPaneOrder so users can
   // drag-reorder. Unknown ids (newly-shipped future panes) get appended at
   // the end so a SoloMD update doesn't blow away an existing user layout.
-  const all: Record<'search' | 'outline' | 'backlinks' | 'relationships' | 'tags' | 'tasks' | 'neighborhood' | 'types' | 'history' | 'inspector' | 'agent', boolean> = {
+  const all: Record<'search' | 'outline' | 'backlinks' | 'relationships' | 'tags' | 'tasks' | 'neighborhood' | 'types' | 'history' | 'inspector', boolean> = {
     search: showSearchPane.value,
     outline: showOutlinePane.value,
     backlinks: showBacklinksPane.value,
@@ -2133,9 +2139,8 @@ const visibleRsPanes = computed(() => {
     types: showTypesPane.value,
     history: showHistoryPane.value,
     inspector: showInspectorPane.value,
-    agent: !IS_APP_STORE_BUILD && settings.showAgentPanel,
   };
-  const known = ['search', 'outline', 'backlinks', 'relationships', 'tags', 'tasks', 'neighborhood', 'types', 'history', 'inspector', 'agent'] as const;
+  const known = ['search', 'outline', 'backlinks', 'relationships', 'tags', 'tasks', 'neighborhood', 'types', 'history', 'inspector'] as const;
   const ordered: string[] = [];
   for (const id of settings.rsPaneOrder || []) {
     if (id in all && !ordered.includes(id)) ordered.push(id);
@@ -2145,7 +2150,7 @@ const visibleRsPanes = computed(() => {
   }
   return ordered
     .filter((id) => all[id as keyof typeof all])
-    .map((id) => ({ id: id as 'search' | 'outline' | 'backlinks' | 'relationships' | 'tags' | 'tasks' | 'neighborhood' | 'types' | 'history' | 'inspector' | 'agent' }));
+    .map((id) => ({ id: id as 'search' | 'outline' | 'backlinks' | 'relationships' | 'tags' | 'tasks' | 'neighborhood' | 'types' | 'history' | 'inspector' }));
 });
 
 // #131 — sidebar pane reordering via the ⋮⋮ grip.
@@ -2236,14 +2241,42 @@ function paneStyle(id: string) {
   return {};
 }
 
-// Side sidebar width — user-resizable via drag handle. Defaults to 260
-// for the read-only panes (outline/backlinks/tags/history), but auto-
-// bumps to 440 when the agent panel is on (chat needs real estate).
-// User resizes above the auto-bump are honored.
+// Side sidebar width — user-resizable via drag handle. The strip only hosts
+// read-only panes now (outline/backlinks/tags/history/…), so it keeps the
+// 260 default; the agent chat got its own dock column with its own width.
 const sideSidebarStyle = computed(() => {
   const w = settings.sideSidebarWidth;
   return { width: `${w}px`, flexBasis: `${w}px` };
 });
+
+// The agent dock is its own column beside the editor. Clamped here as well as
+// in the setter so a hand-edited localStorage blob can't produce a 0px or
+// 5000px panel.
+const agentDockStyle = computed(() => {
+  const raw = Math.round(settings.agentDockWidth) || 440;
+  const w = Math.max(300, Math.min(720, raw));
+  return { width: `${w}px`, flexBasis: `${w}px` };
+});
+
+function onAgentDockResize(ev: MouseEvent) {
+  ev.preventDefault();
+  const startX = ev.clientX;
+  const startW = parseInt(agentDockStyle.value.width, 10);
+  const onMove = (m: MouseEvent) => {
+    // Dock sits left of the right sidebar: dragging left makes it wider.
+    settings.setAgentDockWidth(startW + (startX - m.clientX));
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  };
+  document.body.style.cursor = 'ew-resize';
+  document.body.style.userSelect = 'none';
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
 
 function onSidebarResize(side: 'left' | 'right', ev: MouseEvent) {
   ev.preventDefault();
@@ -2437,11 +2470,6 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
               />
               <HistoryPanel v-if="p.id === 'history'" @close="ctxToggle(() => settings.toggleHistoryPanel())" />
               <PropertiesInspector v-if="p.id === 'inspector'" @close="ctxToggle(() => settings.toggleInspector())" />
-              <AgentPanel
-                v-if="p.id === 'agent'"
-                @close="ctxToggle(() => settings.toggleAgentPanel())"
-                @open-settings="(section?: string) => openSettingsAt(section ?? 'integrations')"
-              />
             </div>
           </template>
         </aside>
@@ -2454,6 +2482,17 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
           <TileRoot v-else :node="tiles.root" @cursor="onCursor" @selection="onSelection" />
           <StatsPill v-if="!basesOpen && !inboxViewOpen && !kanbanOpen && !typeLensOpen && !viewPaneVisible" :line="cursorLine" :col="cursorCol" :selection-text="selectionText" />
         </div>
+        <!-- The agent dock is a column of its own, not a pane of the read-only
+             strip: opening the chat used to bring backlinks / tags / outline
+             along with it. It sits beside the editor so conversation and note
+             stay next to each other. -->
+        <aside v-if="showAgentDock" class="agent-dock" :style="agentDockStyle">
+          <div class="agent-dock__resize" @mousedown="onAgentDockResize($event)" />
+          <AgentPanel
+            @close="settings.toggleAgentPanel()"
+            @open-settings="(section?: string) => openSettingsAt(section ?? 'integrations')"
+          />
+        </aside>
         <aside
           v-if="showRightSidebar && settings.outlineSide !== 'left'"
           class="side-sidebar side-sidebar--right"
@@ -2505,11 +2544,6 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
               />
               <HistoryPanel v-if="p.id === 'history'" @close="ctxToggle(() => settings.toggleHistoryPanel())" />
               <PropertiesInspector v-if="p.id === 'inspector'" @close="ctxToggle(() => settings.toggleInspector())" />
-              <AgentPanel
-                v-if="p.id === 'agent'"
-                @close="ctxToggle(() => settings.toggleAgentPanel())"
-                @open-settings="(section?: string) => openSettingsAt(section ?? 'integrations')"
-              />
             </div>
           </template>
         </aside>
@@ -2577,10 +2611,6 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
           <label class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleHistoryPanel() })">
             <span class="sidebar-ctx__check">{{ settings.showHistoryPanel ? '✓' : '' }}</span>
             {{ t('rsPane.history') }}
-          </label>
-          <label v-if="!IS_APP_STORE_BUILD" class="sidebar-ctx__item" @click="ctxToggle(() => settings.toggleAgentPanel())">
-            <span class="sidebar-ctx__check">{{ settings.showAgentPanel ? '✓' : '' }}</span>
-            {{ t('header.segAgent') }}
           </label>
         </div>
         <div v-if="sidebarCtx" class="sidebar-ctx__backdrop" @click="closeSidebarCtx" />
@@ -2842,6 +2872,23 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
 .app--narrow .side-sidebar--left {
   left: 0;
 }
+/* On a phone the dock is a full-width sheet rather than a column: two 300px
+   panels side by side would leave no editor at all. */
+.app--narrow .agent-dock {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 41;
+  width: 100%;
+  max-width: 100%;
+  flex: none;
+  box-shadow: 0 0 24px rgba(0, 0, 0, 0.28);
+}
+.app--narrow .agent-dock__resize {
+  display: none;
+}
 /* The drag-to-resize handles are a mouse affordance and a 8px touch trap. */
 .app--narrow .side-sidebar__resize {
   display: none;
@@ -2893,6 +2940,29 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
 }
 .side-sidebar--right {
   border-left: var(--bd-hair);
+}
+/* Agent dock: its own column beside the editor (see the template note). */
+.agent-dock {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg);
+  border-left: var(--bd-hair);
+}
+.agent-dock__resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 10;
+  background: transparent;
+}
+.agent-dock__resize:hover {
+  background: var(--accent);
+  opacity: 0.35;
 }
 /* Drag handle for live-resize. Sits on the inner edge of the sidebar
    (right edge of left sidebar, left edge of right sidebar) as a 5px

@@ -235,9 +235,11 @@ interface Settings {
   // Cap protects against a runaway tool loop. C3.2 default is 8.
   agentToolLoopCap: number;
   // Width (in px) of the right/left side sidebar that hosts Outline /
-  // Backlinks / Tags / History / Agent Panel. The agent panel needs more
-  // room than read-only browsing; user-resizable via the drag handle.
+  // Backlinks / Tags / History. User-resizable via the drag handle.
   sideSidebarWidth: number;
+  // Width (in px) of the agent dock — its own column beside the editor, so
+  // the chat never drags the read-only panes along with it. User-resizable.
+  agentDockWidth: number;
   // Width (in px) of the left file tree sidebar. User-resizable via drag handle.
   fileTreeWidth: number;
   // v2.0 F4: BYOK AI rewrite. `aiProvider` is a stable id from
@@ -555,7 +557,6 @@ interface Settings {
     showNeighborhood: boolean;
     showTypesPanel: boolean;
     showHistoryPanel: boolean;
-    showAgentPanel: boolean;
   } | null;
 }
 
@@ -753,6 +754,7 @@ function defaults(): Settings {
     agentAllowWrite: false,
     agentToolLoopCap: 8,
     sideSidebarWidth: 260,
+    agentDockWidth: 440,
     fileTreeWidth: 260,
     aiEnabled: false,
     aiProvider: 'openai',
@@ -837,7 +839,7 @@ function defaults(): Settings {
     smartQuotesOptInMigrated: true,
     pdfPageSizeAutoMigrated: true,
     markdownAutoNumberHeadings: false,
-    rsPaneOrder: ['search', 'outline', 'backlinks', 'relationships', 'tags', 'tasks', 'neighborhood', 'types', 'history', 'inspector', 'agent'],
+    rsPaneOrder: ['search', 'outline', 'backlinks', 'relationships', 'tags', 'tasks', 'neighborhood', 'types', 'history', 'inspector'],
     previewFontSize: 16,
     attachmentMode: 'shared',
     defaultExportDir: '',
@@ -1123,7 +1125,6 @@ export const useSettingsStore = defineStore('settings', {
           const prev = this.lastNonAgentViewMode;
           this.viewMode = prev && prev !== 'agent' && prev !== 'reading' ? prev : 'liveEdit';
         }
-        this.ensureRightSidebarVisible();
         this.persist();
         return;
       }
@@ -1331,7 +1332,6 @@ export const useSettingsStore = defineStore('settings', {
           showNeighborhood: this.showNeighborhood,
           showTypesPanel: this.showTypesPanel,
           showHistoryPanel: this.showHistoryPanel,
-          showAgentPanel: this.showAgentPanel,
         };
         this.rightSidebarHidden = true;
       } else {
@@ -1344,10 +1344,9 @@ export const useSettingsStore = defineStore('settings', {
           this.showNeighborhood = saved.showNeighborhood;
           this.showTypesPanel = saved.showTypesPanel;
           this.showHistoryPanel = saved.showHistoryPanel;
-          this.showAgentPanel = saved.showAgentPanel;
           this._rsPanesBeforeHide = null;
         }
-        if (!this.showBacklinks && !this.showRelationships && !this.showTagsPanel && !this.showTypesPanel && !this.showNeighborhood && !this.showHistoryPanel && !this.showAgentPanel) {
+        if (!this.showBacklinks && !this.showRelationships && !this.showTagsPanel && !this.showTypesPanel && !this.showNeighborhood && !this.showHistoryPanel) {
           this.showBacklinks = true;
           this.showTagsPanel = true;
         }
@@ -1377,7 +1376,6 @@ export const useSettingsStore = defineStore('settings', {
       showNeighborhood: boolean;
       showTypesPanel: boolean;
       showHistoryPanel: boolean;
-      showAgentPanel: boolean;
     }) {
       this._rsPanesBeforeHide = paneBeforeToggle;
       this.rightSidebarHidden = true;
@@ -1519,14 +1517,14 @@ export const useSettingsStore = defineStore('settings', {
       if (this.showTypesPanel) this.ensureRightSidebarVisible();
       this.persist();
     },
-    /** Open or close the agent sidebar. Does not change the content mode. */
+    /** Open or close the agent dock. Independent of the read-only pane strip
+     *  and of the content view mode. */
     toggleAgentPanel() {
       if (this.viewMode === 'agent') {
         const next = this.lastNonAgentViewMode;
         this.viewMode = next && next !== 'agent' && next !== 'reading' ? next : 'liveEdit';
       }
       this.showAgentPanel = !this.showAgentPanel;
-      if (this.showAgentPanel) this.ensureRightSidebarVisible();
       this.persist();
     },
     toggleAgentAllowWrite() {
@@ -1543,6 +1541,13 @@ export const useSettingsStore = defineStore('settings', {
       // eats too much editor space.
       const clean = Math.max(220, Math.min(800, Math.round(w) || 260));
       this.sideSidebarWidth = clean;
+      this.persist();
+    },
+    setAgentDockWidth(w: number) {
+      // Narrower than 300 makes the chat unreadable; wider than 720 leaves the
+      // editor a sliver on a normal laptop window.
+      const clean = Math.max(300, Math.min(720, Math.round(w) || 440));
+      this.agentDockWidth = clean;
       this.persist();
     },
     setFileTreeWidth(w: number) {
