@@ -41,7 +41,6 @@ const detailPriority = ref<'' | KanbanPriority>('');
 const detailDue = ref('');
 const detailColumnId = ref('');
 const detailChecklist = ref<KanbanChecklistItem[]>([]);
-const detailChecked = ref(false);
 const checklistDraft = ref('');
 
 const dragging = ref<string | null>(null);
@@ -195,7 +194,6 @@ function openDetail(task: KanbanTask) {
   detailDue.value = task.due ?? '';
   detailColumnId.value = task.columnId;
   detailChecklist.value = (task.checklist ?? []).map((item) => ({ ...item }));
-  detailChecked.value = !!task.checked;
   checklistDraft.value = '';
 }
 
@@ -213,7 +211,6 @@ function applyDetail(): boolean {
     due: detailDue.value || null,
     checklist: detailChecklist.value,
     columnId: detailColumnId.value,
-    checked: detailChecked.value,
   });
   return true;
 }
@@ -571,10 +568,6 @@ onBeforeUnmount(() => {
             <label class="kanban__field">
               <span>{{ t('kanban.description') }}</span>
               <textarea v-model="detailNotes" class="kanban__notes" rows="4" />
-            </label>
-            <label class="kanban__field kanban__field--check">
-              <input v-model="detailChecked" type="checkbox" />
-              <span>{{ t('kanban.taskDone') }}</span>
             </label>
             <div class="kanban__field-row">
               <label class="kanban__field">
@@ -950,11 +943,6 @@ onBeforeUnmount(() => {
 }
 .kanban__field-row { display: flex; gap: 12px; }
 .kanban__field-row .kanban__field { flex: 1; min-width: 0; }
-.kanban__field--check {
-  flex-direction: row;
-  align-items: center;
-  gap: 6px;
-}
 .kanban__due-row { display: flex; align-items: center; gap: 8px; }
 .kanban__detail-hint { margin: 0; font-size: 11px; color: var(--text-3); }
 .kanban__check-row { display: flex; align-items: center; gap: 6px; }
