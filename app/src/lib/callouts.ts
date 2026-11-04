@@ -57,21 +57,24 @@ const ALIASES: Record<string, string> = {
   cite: 'quote',
 };
 
+/** Obsidian's own callout palette (app.css `--callout-*`). Keep these exact
+ *  values: Note is blue and Tip is teal, and at the 9%/26% mixes used below
+ *  two "close enough" blues would collapse into the same card. */
 const COLORS: Record<string, string> = {
-  note: '#4c8bf5',
-  abstract: '#00b3a4',
-  info: '#4c8bf5',
-  todo: '#4c8bf5',
-  tip: '#00a3c4',
-  important: '#8b6ad6',
-  success: '#2ea043',
-  question: '#c69000',
-  warning: '#d4890b',
-  failure: '#e5534b',
-  danger: '#e5534b',
-  bug: '#e5534b',
-  example: '#a371f7',
-  quote: '#8b949e',
+  note: '#448aff',
+  abstract: '#00b0ff',
+  info: '#00b8d4',
+  todo: '#00b8d4',
+  tip: '#00bfa5',
+  important: '#00bfa5',
+  success: '#08b94e',
+  question: '#ec7500',
+  warning: '#ec7500',
+  failure: '#e93147',
+  danger: '#e93147',
+  bug: '#e93147',
+  example: '#7852ee',
+  quote: '#9e9e9e',
 };
 
 /** Lucide-style strokes, the same set Obsidian uses for each callout type. */

@@ -652,7 +652,6 @@ details.md-callout,
 .preview-content blockquote.md-callout,
 .preview-content details.md-callout,
 .cm-live-block--callout .md-callout {
-  --callout: #4c8bf5;
   border: 1px solid color-mix(in srgb, var(--callout) 32%, transparent);
   border-left: 3px solid var(--callout);
   border-radius: 8px;
@@ -719,20 +718,46 @@ details.md-callout > p,
 .md-callout > :last-child { margin-bottom: 8px; }
 /* A real blank line is a second paragraph; keep a small gap only then. */
 .md-callout p + p { margin-top: 0.45em; }
-.md-callout--note { --callout: #4c8bf5; }
-.md-callout--abstract { --callout: #00b3a4; }
-.md-callout--info { --callout: #4c8bf5; }
-.md-callout--todo { --callout: #4c8bf5; }
-.md-callout--tip { --callout: #00a3c4; }
-.md-callout--important { --callout: #8b6ad6; }
-.md-callout--success { --callout: #2ea043; }
-.md-callout--question { --callout: #c69000; }
-.md-callout--warning { --callout: #d4890b; }
+/* Obsidian's callout body is tighter than document prose: a heading written
+   as `> ## Title` must not carry the 1.6em document margin, and a task list
+   hangs its checkboxes from the body edge instead of indenting a further
+   1.25rem. Without this the checklist floats a screen-line away from the
+   title and every item sits one checkbox-width too far right. */
+.md-callout h1,
+.md-callout h2,
+.md-callout h3,
+.md-callout h4,
+.md-callout h5,
+.md-callout h6 {
+  margin: 0.6em 0 0.25em;
+}
+.md-callout ul,
+.md-callout ol {
+  margin: 0.25em 0 0;
+  padding-left: 1.3em;
+}
+.md-callout > .contains-task-list {
+  padding-left: 0;
+}
+/* Fallback first; the per-type classes below are the same specificity and
+   come later, so they win. Do NOT put `--callout` back on the compound
+   `blockquote.md-callout` selectors above: element+class outranks the plain
+   `.md-callout--tip` class and every callout silently turns Note-blue. */
+.md-callout { --callout: #448aff; }
+.md-callout--note { --callout: #448aff; }
+.md-callout--abstract { --callout: #00b0ff; }
+.md-callout--info { --callout: #00b8d4; }
+.md-callout--todo { --callout: #00b8d4; }
+.md-callout--tip { --callout: #00bfa5; }
+.md-callout--important { --callout: #00bfa5; }
+.md-callout--success { --callout: #08b94e; }
+.md-callout--question { --callout: #ec7500; }
+.md-callout--warning { --callout: #ec7500; }
 .md-callout--failure,
 .md-callout--danger,
-.md-callout--bug { --callout: #e5534b; }
-.md-callout--example { --callout: #a371f7; }
-.md-callout--quote { --callout: #8b949e; }
+.md-callout--bug { --callout: #e93147; }
+.md-callout--example { --callout: #7852ee; }
+.md-callout--quote { --callout: #9e9e9e; }
 
 .contains-task-list {
   list-style: none;
