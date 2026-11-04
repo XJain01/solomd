@@ -3,7 +3,7 @@
  * Center-pane task kanban. Projects, columns, and tasks are created by the
  * user and stored on this device. Notes in the vault are not cards.
  */
-import { computed, onBeforeUnmount, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import Icons from './Icons.vue';
 import '../styles/panels.css';
 import { useI18n } from '../i18n';
@@ -21,6 +21,10 @@ const project = computed(() =>
 const creatingProject = ref(false);
 const projectDraft = ref('');
 const renamingProject = ref(false);
+const projectNameInput = ref<HTMLInputElement | null>(null);
+// Esc must not be treated as a commit when the browser fires blur on the
+// input we are about to unmount.
+let skipRenameCommit = false;
 const columnDraft = ref('');
 const addingColumn = ref(false);
 const taskDraft = ref<Record<string, string>>({});
@@ -30,7 +34,14 @@ const editNotes = ref('');
 
 const dragging = ref<string | null>(null);
 const overCol = ref<string | null>(null);
-let suppressClick = false;
+// The card under the cursor stays where it is (dimmed); this follows the
+// pointer so the drag has something visible in the hand.
+const ghost = ref<{ x: number; y: number; title: string } | null>(null);
+// A drag that ends back over a card still fires click/dblclick, which would
+// drop the user into the editor by accident. Swallow the following open for as
+// long as the browser's double-click window is live.
+let justDragged = false;
+let justDraggedTimer = 0;
 let dragStart: { x: number; y: number; id: string; moved: boolean } | null = null;
 
 function close() {
@@ -52,6 +63,31 @@ function commitProject() {
   board.createProject(name, defaultColumns());
   creatingProject.value = false;
   projectDraft.value = '';
+}
+
+function startProjectRename() {
+  renamingProject.value = true;
+  // The header swaps a <select> for an <input>; autofocus only applies on the
+  // first mount, so focus by hand once the input exists.
+  nextTick(() => projectNameInput.value?.focus());
+}
+
+function commitProjectName(name: string) {
+  if (skipRenameCommit) {
+    skipRenameCommit = false;
+    renamingProject.value = false;
+    return;
+  }
+  const current = project.value;
+  renamingProject.value = false;
+  const trimmed = name.trim();
+  if (!current || !trimmed || trimmed === current.name) return;
+  board.renameProject(current.id, trimmed);
+}
+
+function cancelProjectRename() {
+  skipRenameCommit = true;
+  renamingProject.value = false;
 }
 
 function removeProject() {
@@ -96,10 +132,7 @@ function addTask(columnId: string) {
 }
 
 function openTask(task: KanbanTask) {
-  if (suppressClick) {
-    suppressClick = false;
-    return;
-  }
+  if (justDragged) return;
   editingId.value = task.id;
   editTitle.value = task.title;
   editNotes.value = task.notes;
@@ -130,9 +163,31 @@ function columnAt(x: number, y: number): string | null {
 function onCardPointerDown(e: PointerEvent, id: string) {
   if (e.button !== 0) return;
   if ((e.target as HTMLElement | null)?.closest('input, textarea, button')) return;
+  // A press-drag over text means "select this text" by default. On a card it
+  // means "move this card", so cancel the selection gesture and focus the card
+  // ourselves (preventDefault also suppresses the browser's own focus handling).
+  e.preventDefault();
+  (e.currentTarget as HTMLElement | null)?.focus();
   dragStart = { x: e.clientX, y: e.clientY, id, moved: false };
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', onPointerUp);
+}
+
+function taskTitle(id: string): string {
+  return project.value?.tasks.find((item) => item.id === id)?.title ?? '';
+}
+
+function setDragChrome(on: boolean) {
+  document.body.style.cursor = on ? 'grabbing' : '';
+  document.body.style.userSelect = on ? 'none' : '';
+}
+
+function clearDragVisuals() {
+  dragging.value = null;
+  overCol.value = null;
+  ghost.value = null;
+  setDragChrome(false);
 }
 
 function onPointerMove(e: PointerEvent) {
@@ -140,25 +195,33 @@ function onPointerMove(e: PointerEvent) {
   const dx = e.clientX - dragStart.x;
   const dy = e.clientY - dragStart.y;
   if (!dragStart.moved && dx * dx + dy * dy < 36) return;
-  dragStart.moved = true;
-  dragging.value = dragStart.id;
+  if (!dragStart.moved) {
+    dragStart.moved = true;
+    dragging.value = dragStart.id;
+    setDragChrome(true);
+  }
+  ghost.value = { x: e.clientX, y: e.clientY, title: taskTitle(dragStart.id) };
   overCol.value = columnAt(e.clientX, e.clientY);
 }
 
 function onPointerUp(e: PointerEvent) {
   window.removeEventListener('pointermove', onPointerMove);
   window.removeEventListener('pointerup', onPointerUp);
+  window.removeEventListener('pointercancel', onPointerUp);
   const start = dragStart;
   dragStart = null;
-  if (start?.moved) {
-    suppressClick = true;
-    queueMicrotask(() => { suppressClick = false; });
+  const moved = start?.moved ?? false;
+  const target = moved ? columnAt(e.clientX, e.clientY) : null;
+  clearDragVisuals();
+  if (moved && start) {
+    justDragged = true;
+    window.clearTimeout(justDraggedTimer);
+    justDraggedTimer = window.setTimeout(() => {
+      justDragged = false;
+    }, 500);
   }
-  const target = start?.moved ? columnAt(e.clientX, e.clientY) : null;
-  dragging.value = null;
-  overCol.value = null;
   const current = project.value;
-  if (!start?.moved || !current || !start.id || !target) return;
+  if (!moved || !current || !start?.id || !target) return;
   const task = current.tasks.find((item) => item.id === start.id);
   if (!task || task.columnId === target) return;
   board.moveTask(current.id, task.id, target);
@@ -167,6 +230,9 @@ function onPointerUp(e: PointerEvent) {
 onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onPointerMove);
   window.removeEventListener('pointerup', onPointerUp);
+  window.removeEventListener('pointercancel', onPointerUp);
+  window.clearTimeout(justDraggedTimer);
+  clearDragVisuals();
 });
 </script>
 
@@ -177,19 +243,43 @@ onBeforeUnmount(() => {
         <Icons name="chevron-left" :size="18" />
       </button>
       <h1 class="pg-title">{{ t('kanban.heading') }}</h1>
-      <label v-if="board.projects.length" class="kanban__project">
-        <span class="kanban__project-label">{{ t('kanban.projects') }}</span>
-        <select
-          class="kanban__select"
-          :value="project?.id || ''"
-          @change="board.setActive(($event.target as HTMLSelectElement).value)"
-        >
-          <option v-for="item in board.projects" :key="item.id" :value="item.id">{{ item.name }}</option>
-        </select>
-      </label>
+      <span v-if="project" class="kanban__project">
+        <input
+          v-if="renamingProject"
+          ref="projectNameInput"
+          class="kanban__input kanban__project-name"
+          :value="project.name"
+          :aria-label="t('kanban.projectName')"
+          @change="commitProjectName(($event.target as HTMLInputElement).value)"
+          @blur="commitProjectName(($event.target as HTMLInputElement).value)"
+          @keydown.enter.prevent="commitProjectName(($event.target as HTMLInputElement).value)"
+          @keydown.esc.prevent="cancelProjectRename"
+        />
+        <template v-else>
+          <select
+            class="kanban__select"
+            :value="project.id"
+            :aria-label="t('kanban.projects')"
+            @change="board.setActive(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="item in board.projects" :key="item.id" :value="item.id">{{ item.name }}</option>
+          </select>
+          <button
+            class="pg-icon-btn"
+            type="button"
+            :title="t('kanban.projectName')"
+            :aria-label="t('kanban.projectName')"
+            @click="startProjectRename"
+          >
+            <Icons name="pencil" :size="14" />
+          </button>
+        </template>
+      </span>
       <span class="pg-spacer" />
-      <button class="rp-btn" type="button" @click="startProject">{{ t('kanban.newProject') }}</button>
-      <button v-if="project" class="rp-btn" type="button" @click="removeProject">{{ t('kanban.deleteProject') }}</button>
+      <span class="kanban__actions">
+        <button class="rp-btn" type="button" @click="startProject">{{ t('kanban.newProject') }}</button>
+        <button v-if="project" class="rp-btn" type="button" @click="removeProject">{{ t('kanban.deleteProject') }}</button>
+      </span>
     </header>
 
     <form v-if="creatingProject" class="kanban__create" @submit.prevent="commitProject">
@@ -211,21 +301,7 @@ onBeforeUnmount(() => {
     </div>
 
     <template v-else-if="project">
-      <div class="kanban__toolbar">
-        <input
-          v-if="renamingProject"
-          class="kanban__input"
-          :value="project.name"
-          @change="board.renameProject(project.id, ($event.target as HTMLInputElement).value); renamingProject = false"
-          @keydown.enter="board.renameProject(project.id, ($event.target as HTMLInputElement).value); renamingProject = false"
-        />
-        <button v-else class="kanban__rename" type="button" @click="renamingProject = true">
-          {{ project.name }}
-        </button>
-        <span class="kanban__hint">{{ t('kanban.hint') }}</span>
-      </div>
-
-      <div class="kanban__board pg-body" role="list">
+      <div class="kanban__board pg-body" role="list" :title="t('kanban.hint')">
         <section
           v-for="col in project.columns"
           :key="col.id"
@@ -253,12 +329,14 @@ onBeforeUnmount(() => {
               :key="task.id"
               class="kanban__card"
               :class="{ 'kanban__card--dragging': dragging === task.id }"
+              tabindex="0"
               @pointerdown="onCardPointerDown($event, task.id)"
-              @click="openTask(task)"
+              @dblclick="openTask(task)"
+              @keydown.enter.prevent="openTask(task)"
             >
               <template v-if="editingId === task.id">
-                <input v-model="editTitle" class="kanban__input" type="text" :placeholder="t('kanban.taskTitle')" @click.stop @pointerdown.stop />
-                <textarea v-model="editNotes" class="kanban__notes" rows="3" :placeholder="t('kanban.taskNotes')" @click.stop @pointerdown.stop />
+                <input v-model="editTitle" class="kanban__input kanban__card-input" type="text" :placeholder="t('kanban.taskTitle')" @click.stop @pointerdown.stop @keydown.stop />
+                <textarea v-model="editNotes" class="kanban__notes kanban__card-input" rows="3" :placeholder="t('kanban.taskNotes')" @click.stop @pointerdown.stop @keydown.stop />
                 <div class="kanban__card-actions">
                   <button class="rp-btn" type="button" @click.stop="saveTask">{{ t('kanban.save') }}</button>
                   <button class="rp-btn" type="button" @click.stop="removeTask">{{ t('kanban.deleteTask') }}</button>
@@ -268,6 +346,18 @@ onBeforeUnmount(() => {
               <template v-else>
                 <span class="kanban__card-title">{{ task.title }}</span>
                 <span v-if="task.notes" class="kanban__card-notes">{{ task.notes }}</span>
+                <!-- Deliberate alternative to double-click: a single click here
+                     is unambiguous because it sits on a control, not the card. -->
+                <button
+                  class="kanban__card-edit"
+                  type="button"
+                  :title="t('kanban.editTask')"
+                  :aria-label="t('kanban.editTask')"
+                  @click.stop="openTask(task)"
+                  @pointerdown.stop
+                >
+                  <Icons name="pencil" :size="13" />
+                </button>
               </template>
             </article>
             <p v-if="tasksIn(col.id).length === 0" class="kanban__drop">{{ t('kanban.noTasks') }}</p>
@@ -295,18 +385,22 @@ onBeforeUnmount(() => {
         </section>
       </div>
     </template>
+
+    <!-- Teleported so the drag preview is never clipped by a scrolling column
+         or offset by an ancestor transform; it is pointer-transparent, so it
+         cannot steal the drop target lookup under the cursor. -->
+    <Teleport to="body">
+      <div
+        v-if="ghost"
+        class="kanban__ghost"
+        :style="{ left: `${ghost.x}px`, top: `${ghost.y}px` }"
+        aria-hidden="true"
+      >{{ ghost.title }}</div>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
-.kanban__project {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.kanban__project-label,
-.kanban__hint,
 .kanban__count,
 .kanban__card-notes,
 .kanban__drop {
@@ -324,23 +418,37 @@ onBeforeUnmount(() => {
   border-radius: var(--r-sm);
   padding: 4px 8px;
 }
-.kanban__select { max-width: 220px; }
-.kanban__create,
-.kanban__toolbar {
+/* Header groups: `.pg-head` wraps on a narrow content column (agent dock
+   open), so keep each group on one line rather than letting the pencil or a
+   button drop onto its own ragged row. */
+.kanban__project,
+.kanban__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.kanban__project {
+  /* Shrinkable so a narrow content column (agent dock open) costs the select
+     width instead of pushing the whole header onto extra rows. */
+  flex: 1 1 120px;
+}
+.kanban__actions { flex: 0 0 auto; }
+.kanban__select {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 220px;
+}
+.kanban__project-name {
+  width: 200px;
+  max-width: 220px;
+}
+.kanban__create {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 16px 0;
-}
-.kanban__hint { margin-left: auto; max-width: 420px; }
-.kanban__rename {
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0;
 }
 .kanban__empty {
   flex: 1;
@@ -424,6 +532,7 @@ onBeforeUnmount(() => {
   min-height: 48px;
 }
 .kanban__card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -437,9 +546,61 @@ onBeforeUnmount(() => {
   text-align: left;
   cursor: grab;
   touch-action: none;
+  /* A card is a drag target, not a text surface: without this a press-drag
+     highlights the title instead of moving the card. Inputs inside the edit
+     state re-enable selection (see .kanban__input / .kanban__notes). */
+  user-select: none;
+  -webkit-user-select: none;
 }
-.kanban__card--dragging { opacity: 0.45; }
+.kanban__card--dragging {
+  opacity: 0.35;
+  cursor: grabbing;
+}
+.kanban__card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.kanban__card-input {
+  user-select: text;
+  -webkit-user-select: text;
+}
 .kanban__card-title { font-weight: 560; line-height: 1.4; }
+.kanban__card-edit {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--fill-1);
+  color: var(--text-2);
+  cursor: pointer;
+  opacity: 0;
+}
+.kanban__card:hover .kanban__card-edit,
+.kanban__card:focus-within .kanban__card-edit { opacity: 1; }
+.kanban__card-edit:hover { background: var(--fill-2); color: var(--text); }
+.kanban__ghost {
+  position: fixed;
+  z-index: 999;
+  max-width: 260px;
+  padding: 10px 12px;
+  border: var(--bd-hair);
+  border-radius: var(--r-md);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: var(--shadow-2, 0 8px 24px rgb(0 0 0 / 22%));
+  pointer-events: none;
+  transform: translate(-50%, -50%) rotate(-1.5deg);
+  opacity: 0.92;
+}
 .kanban__card-notes {
   display: -webkit-box;
   -webkit-line-clamp: 3;
