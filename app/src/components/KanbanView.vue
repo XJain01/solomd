@@ -41,6 +41,7 @@ const detailPriority = ref<'' | KanbanPriority>('');
 const detailDue = ref('');
 const detailColumnId = ref('');
 const detailChecklist = ref<KanbanChecklistItem[]>([]);
+const detailChecked = ref(false);
 const checklistDraft = ref('');
 
 const dragging = ref<string | null>(null);
@@ -188,39 +189,17 @@ function openDetail(task: KanbanTask) {
   detailDue.value = task.due ?? '';
   detailColumnId.value = task.columnId;
   detailChecklist.value = (task.checklist ?? []).map((item) => ({ ...item }));
+  detailChecked.value = !!task.checked;
   checklistDraft.value = '';
 }
 
-function closeDetail() {
-  detailId.value = null;
-  checklistDraft.value = '';
-}
-
-/** Non-modal drawer: a click anywhere outside closes it, without swallowing
- *  the click that the file tree or another card needs. */
-function onDocumentPointerDown(e: PointerEvent) {
-  const target = e.target as HTMLElement | null;
-  if (target?.closest('.kanban__detail')) return;
-  closeDetail();
-}
-
-watch(detailId, (id) => {
-  if (id) document.addEventListener('pointerdown', onDocumentPointerDown, true);
-  else document.removeEventListener('pointerdown', onDocumentPointerDown, true);
-});
-
-/** Toggle `[ ]` / `[x]` without opening the drawer. */
-function toggleTask(task: KanbanTask) {
-  const current = project.value;
-  if (!current) return;
-  board.updateTask(current.id, task.id, { checked: !task.checked });
-}
-
-function saveDetail() {
+/** Persist the drawer's local edits. Returns false when there is nothing
+ *  valid to save (e.g. an empty title), in which case closing discards them. */
+function applyDetail(): boolean {
   const current = project.value;
   const id = detailId.value;
   const title = detailTitle.value.trim();
-  if (!current || !id || !title) return;
+  if (!current || !id || !title) return false;
   board.updateTask(current.id, id, {
     title,
     notes: detailNotes.value,
@@ -228,8 +207,24 @@ function saveDetail() {
     due: detailDue.value || null,
     checklist: detailChecklist.value,
     columnId: detailColumnId.value,
+    checked: detailChecked.value,
   });
-  closeDetail();
+  return true;
+}
+
+function closeDetailOnly() {
+  detailId.value = null;
+  checklistDraft.value = '';
+}
+
+/** Closing always saves: X, the scrim, and the Close button all land here. */
+function closeDetail() {
+  applyDetail();
+  closeDetailOnly();
+}
+
+function saveDetail() {
+  if (applyDetail()) closeDetailOnly();
 }
 
 function deleteDetail() {
@@ -237,7 +232,7 @@ function deleteDetail() {
   const id = detailId.value;
   if (!current || !id) return;
   board.deleteTask(current.id, id);
-  closeDetail();
+  closeDetailOnly();
 }
 
 function addChecklistItem() {
@@ -343,7 +338,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onPointerMove);
   window.removeEventListener('pointerup', onPointerUp);
   window.removeEventListener('pointercancel', onPointerUp);
-  document.removeEventListener('pointerdown', onDocumentPointerDown, true);
   window.clearTimeout(holdTimer);
   clearDragVisuals();
 });
@@ -468,15 +462,6 @@ onBeforeUnmount(() => {
               @keydown.enter.prevent="openTask(task)"
             >
               <span class="kanban__card-line">
-                <input
-                  class="kanban__check"
-                  type="checkbox"
-                  :checked="!!task.checked"
-                  :aria-label="t('kanban.taskDone')"
-                  @click.stop
-                  @pointerdown.stop
-                  @change="toggleTask(task)"
-                />
                 <span class="kanban__card-title" :class="{ 'kanban__card-title--done': task.checked }">{{ task.title }}</span>
               </span>
               <span
@@ -549,17 +534,10 @@ onBeforeUnmount(() => {
       >{{ ghost.title }}</div>
     </Teleport>
 
-    <!-- Task detail drawer. Local edits until Save so Cancel is real. It is
-         deliberately non-modal: a click on the file tree or another card still
-         does its normal job instead of being eaten by a scrim. -->
+    <!-- Task detail drawer with a modal scrim; closing saves. -->
     <Teleport to="body">
-      <aside
-        v-if="detailId"
-        class="kanban__detail"
-        role="dialog"
-        aria-modal="false"
-        @pointerdown.stop
-      >
+      <div v-if="detailId" class="kanban__detail-backdrop" @click.self="closeDetail">
+        <aside class="kanban__detail" role="dialog" aria-modal="true" @pointerdown.stop>
         <header class="kanban__detail-head">
             <h2 class="kanban__detail-title">{{ t('kanban.taskDetails') }}</h2>
             <button class="kanban__icon" type="button" :aria-label="t('kanban.cancel')" @click="closeDetail">
@@ -574,6 +552,10 @@ onBeforeUnmount(() => {
             <label class="kanban__field">
               <span>{{ t('kanban.description') }}</span>
               <textarea v-model="detailNotes" class="kanban__notes" rows="4" />
+            </label>
+            <label class="kanban__field kanban__field--check">
+              <input v-model="detailChecked" type="checkbox" />
+              <span>{{ t('kanban.taskDone') }}</span>
             </label>
             <div class="kanban__field-row">
               <label class="kanban__field">
@@ -628,12 +610,13 @@ onBeforeUnmount(() => {
           <footer class="kanban__detail-foot">
             <button class="rp-btn" type="button" @click="deleteDetail">{{ t('kanban.deleteTask') }}</button>
             <span class="pg-spacer" />
-            <button class="rp-btn" type="button" @click="closeDetail">{{ t('kanban.cancel') }}</button>
+            <button class="rp-btn" type="button" @click="closeDetail">{{ t('kanban.close') }}</button>
             <button class="rp-btn" type="button" :disabled="!detailTitle.trim()" @click="saveDetail">
               {{ t('kanban.save') }}
             </button>
           </footer>
         </aside>
+      </div>
     </Teleport>
   </div>
 </template>
@@ -876,18 +859,22 @@ onBeforeUnmount(() => {
 }
 .kanban__count--over { color: var(--danger); font-weight: 700; }
 
-/* Task detail drawer — fixed to the right edge, no scrim, so the file tree
-   and the board stay clickable underneath. */
-.kanban__detail {
+/* Task detail drawer — modal scrim, closing saves. */
+.kanban__detail-backdrop {
   position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   z-index: 90;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.28);
+}
+.kanban__detail {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 360px;
   max-width: 100%;
+  height: 100%;
   background: var(--bg);
   border-left: var(--bd-hair);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.16);
@@ -917,6 +904,11 @@ onBeforeUnmount(() => {
 }
 .kanban__field-row { display: flex; gap: 12px; }
 .kanban__field-row .kanban__field { flex: 1; min-width: 0; }
+.kanban__field--check {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
 .kanban__due-row { display: flex; align-items: center; gap: 8px; }
 .kanban__detail-hint { margin: 0; font-size: 11px; color: var(--text-3); }
 .kanban__check-row { display: flex; align-items: center; gap: 6px; }

@@ -2421,6 +2421,7 @@ export const zh: I18n = {
     loading: "正在加载看板…",
     taskDone: "完成",
     taskDetails: "任务详情",
+    close: "关闭",
     title: "标题",
     description: "描述",
     priority: "优先级",

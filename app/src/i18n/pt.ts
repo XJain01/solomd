@@ -2419,6 +2419,7 @@ export const pt: I18n = {
     loading: 'Loading boards…',
     taskDone: 'Done',
     taskDetails: 'Task details',
+    close: 'Close',
     title: 'Title',
     description: 'Description',
     priority: 'Priority',
