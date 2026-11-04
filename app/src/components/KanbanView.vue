@@ -1,78 +1,125 @@
 <script setup lang="ts">
 /**
- * Center-pane kanban. Notes are cards grouped by frontmatter `status`
- * (or `state` / `stage` / `phase` when that's the key already on the note).
- * Dragging a card to another column writes that field back.
+ * Center-pane task kanban. Projects, columns, and tasks are created by the
+ * user and stored on this device. Notes in the vault are not cards.
  */
 import { computed, onBeforeUnmount, ref } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
 import Icons from './Icons.vue';
 import '../styles/panels.css';
 import { useI18n } from '../i18n';
-import { useFiles } from '../composables/useFiles';
-import { useTabsStore } from '../stores/tabs';
-import { useToastsStore } from '../stores/toasts';
-import { useWorkspaceIndexStore, type IndexEntry } from '../stores/workspaceIndex';
-import { useWorkspaceStore } from '../stores/workspace';
-import { noteOwnWrite } from '../lib/external-change';
-import {
-  UNSORTED_COLUMN,
-  columnForNote,
-  kanbanColumns,
-  moveNoteStatus,
-  type KanbanColumn,
-} from '../lib/kanban';
+import { useKanbanStore } from '../stores/kanban';
+import type { KanbanTask } from '../lib/kanban';
 import { KANBAN_CLOSE_EVENT } from '../composables/useKanbanView';
 
 const { t } = useI18n();
-const files = useFiles();
-const tabs = useTabsStore();
-const toasts = useToastsStore();
-const idx = useWorkspaceIndexStore();
-const workspace = useWorkspaceStore();
+const board = useKanbanStore();
 
-const notes = computed(() =>
-  idx.entries.filter((e) => {
-    if (/[/\\]\.solomd[/\\]/.test(e.path)) return false;
-    return /\.(md|markdown|mdown|mkd)$/i.test(e.name);
-  }),
+const project = computed(() =>
+  board.projects.find((p) => p.id === board.activeProjectId) ?? board.projects[0] ?? null,
 );
 
-const columns = computed(() => kanbanColumns(notes.value));
+const creatingProject = ref(false);
+const projectDraft = ref('');
+const renamingProject = ref(false);
+const columnDraft = ref('');
+const addingColumn = ref(false);
+const taskDraft = ref<Record<string, string>>({});
+const editingId = ref<string | null>(null);
+const editTitle = ref('');
+const editNotes = ref('');
 
-function cardsIn(col: KanbanColumn): IndexEntry[] {
-  return notes.value.filter((n) => columnForNote(n, columns.value) === col.id);
-}
-
-function columnLabel(col: KanbanColumn): string {
-  if (col.id === UNSORTED_COLUMN) return t('kanban.unsorted');
-  if (col.id === 'todo') return t('kanban.todo');
-  if (col.id === 'doing') return t('kanban.doing');
-  if (col.id === 'done') return t('kanban.done');
-  return col.writeValue ?? col.id;
-}
-
-function titleFor(entry: IndexEntry): string {
-  return entry.title || entry.stem || entry.name;
-}
+const dragging = ref<string | null>(null);
+const overCol = ref<string | null>(null);
+let suppressClick = false;
+let dragStart: { x: number; y: number; id: string; moved: boolean } | null = null;
 
 function close() {
   window.dispatchEvent(new CustomEvent(KANBAN_CLOSE_EVENT));
 }
 
-async function openCard(entry: IndexEntry) {
+function defaultColumns(): string[] {
+  return [t('kanban.colTodo'), t('kanban.colDoing'), t('kanban.colDone')];
+}
+
+function startProject() {
+  creatingProject.value = true;
+  projectDraft.value = '';
+}
+
+function commitProject() {
+  const name = projectDraft.value.trim();
+  if (!name) return;
+  board.createProject(name, defaultColumns());
+  creatingProject.value = false;
+  projectDraft.value = '';
+}
+
+function removeProject() {
+  const current = project.value;
+  if (!current) return;
+  if (!window.confirm(t('kanban.confirmDeleteProject'))) return;
+  board.deleteProject(current.id);
+}
+
+function commitColumn() {
+  const current = project.value;
+  const title = columnDraft.value.trim();
+  if (!current || !title) return;
+  board.addColumn(current.id, title);
+  columnDraft.value = '';
+  addingColumn.value = false;
+}
+
+function removeColumn(columnId: string) {
+  const current = project.value;
+  if (!current) return;
+  if (!window.confirm(t('kanban.confirmDeleteColumn'))) return;
+  board.deleteColumn(current.id, columnId);
+}
+
+function renameColumn(columnId: string, title: string) {
+  const current = project.value;
+  if (!current) return;
+  board.renameColumn(current.id, columnId, title);
+}
+
+function tasksIn(columnId: string): KanbanTask[] {
+  return project.value?.tasks.filter((task) => task.columnId === columnId) ?? [];
+}
+
+function addTask(columnId: string) {
+  const current = project.value;
+  const title = (taskDraft.value[columnId] || '').trim();
+  if (!current || !title) return;
+  board.addTask(current.id, columnId, title);
+  taskDraft.value = { ...taskDraft.value, [columnId]: '' };
+}
+
+function openTask(task: KanbanTask) {
   if (suppressClick) {
     suppressClick = false;
     return;
   }
-  await files.openPath(entry.path, { bypassNewWindow: true });
-  close();
+  editingId.value = task.id;
+  editTitle.value = task.title;
+  editNotes.value = task.notes;
 }
 
-const dragging = ref<{ path: string } | null>(null);
-const overCol = ref<string | null>(null);
-let suppressClick = false;
-let dragStart: { x: number; y: number; path: string; moved: boolean } | null = null;
+function saveTask() {
+  const current = project.value;
+  const id = editingId.value;
+  if (!current || !id) return;
+  board.updateTask(current.id, id, { title: editTitle.value, notes: editNotes.value });
+  editingId.value = null;
+}
+
+function removeTask() {
+  const current = project.value;
+  const id = editingId.value;
+  if (!current || !id) return;
+  board.deleteTask(current.id, id);
+  editingId.value = null;
+}
 
 function columnAt(x: number, y: number): string | null {
   const el = document.elementFromPoint(x, y);
@@ -80,9 +127,10 @@ function columnAt(x: number, y: number): string | null {
   return col?.dataset.kanbanCol ?? null;
 }
 
-function onCardPointerDown(e: PointerEvent, path: string) {
+function onCardPointerDown(e: PointerEvent, id: string) {
   if (e.button !== 0) return;
-  dragStart = { x: e.clientX, y: e.clientY, path, moved: false };
+  if ((e.target as HTMLElement | null)?.closest('input, textarea, button')) return;
+  dragStart = { x: e.clientX, y: e.clientY, id, moved: false };
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerup', onPointerUp);
 }
@@ -93,16 +141,15 @@ function onPointerMove(e: PointerEvent) {
   const dy = e.clientY - dragStart.y;
   if (!dragStart.moved && dx * dx + dy * dy < 36) return;
   dragStart.moved = true;
-  dragging.value = { path: dragStart.path };
+  dragging.value = dragStart.id;
   overCol.value = columnAt(e.clientX, e.clientY);
 }
 
-async function onPointerUp(e: PointerEvent) {
+function onPointerUp(e: PointerEvent) {
   window.removeEventListener('pointermove', onPointerMove);
   window.removeEventListener('pointerup', onPointerUp);
   const start = dragStart;
   dragStart = null;
-  const path = start?.path;
   if (start?.moved) {
     suppressClick = true;
     queueMicrotask(() => { suppressClick = false; });
@@ -110,50 +157,11 @@ async function onPointerUp(e: PointerEvent) {
   const target = start?.moved ? columnAt(e.clientX, e.clientY) : null;
   dragging.value = null;
   overCol.value = null;
-  if (!start?.moved || !path || !target) return;
-  const entry = notes.value.find((n) => n.path === path);
-  const col = columns.value.find((c) => c.id === target);
-  if (!entry || !col) return;
-  if (columnForNote(entry, columns.value) === col.id) return;
-  await moveCard(entry, col);
-}
-
-async function moveCard(entry: IndexEntry, col: KanbanColumn) {
-  const prev = entry.frontmatter ? { ...entry.frontmatter } : null;
-  applyOptimistic(entry, col);
-  try {
-    const open = tabs.tabs.find((tab) => tab.filePath === entry.path);
-    if (open) {
-      const next = moveNoteStatus(open.content || '', col);
-      tabs.setContent(open.id, next);
-      const ok = await files.saveTab(open, { silent: true });
-      if (!ok) throw new Error('save failed');
-      return;
-    }
-    const read = await invoke<{ content: string; encoding?: string }>('read_file', { path: entry.path });
-    const next = moveNoteStatus(read.content, col);
-    const payload = next;
-    noteOwnWrite(entry.path, payload);
-    await invoke('write_file', {
-      path: entry.path,
-      content: payload,
-      encoding: read.encoding || 'UTF-8',
-      workspace: workspace.currentFolder ?? undefined,
-    });
-    window.dispatchEvent(new CustomEvent('solomd:saved', { detail: { filePath: entry.path } }));
-  } catch (e) {
-    entry.frontmatter = prev;
-    toasts.error(t('kanban.moveFailed', { error: String(e) }));
-  }
-}
-
-function applyOptimistic(entry: IndexEntry, col: KanbanColumn) {
-  const fm: Record<string, unknown> = { ...(entry.frontmatter ?? {}) };
-  const existing = Object.keys(fm).find((k) => /^(status|state|stage|phase)$/i.test(k));
-  const key = existing ?? 'status';
-  if (col.writeValue == null) delete fm[key];
-  else fm[key] = col.writeValue;
-  entry.frontmatter = Object.keys(fm).length ? fm : null;
+  const current = project.value;
+  if (!start?.moved || !current || !start.id || !target) return;
+  const task = current.tasks.find((item) => item.id === start.id);
+  if (!task || task.columnId === target) return;
+  board.moveTask(current.id, task.id, target);
 }
 
 onBeforeUnmount(() => {
@@ -169,55 +177,170 @@ onBeforeUnmount(() => {
         <Icons name="chevron-left" :size="18" />
       </button>
       <h1 class="pg-title">{{ t('kanban.heading') }}</h1>
-      <span class="pg-subtitle">{{ notes.length }}</span>
+      <label v-if="board.projects.length" class="kanban__project">
+        <span class="kanban__project-label">{{ t('kanban.projects') }}</span>
+        <select
+          class="kanban__select"
+          :value="project?.id || ''"
+          @change="board.setActive(($event.target as HTMLSelectElement).value)"
+        >
+          <option v-for="item in board.projects" :key="item.id" :value="item.id">{{ item.name }}</option>
+        </select>
+      </label>
       <span class="pg-spacer" />
-      <span class="kanban__hint">{{ t('kanban.hint') }}</span>
+      <button class="rp-btn" type="button" @click="startProject">{{ t('kanban.newProject') }}</button>
+      <button v-if="project" class="rp-btn" type="button" @click="removeProject">{{ t('kanban.deleteProject') }}</button>
     </header>
 
-    <div v-if="notes.length === 0" class="kanban__empty">
+    <form v-if="creatingProject" class="kanban__create" @submit.prevent="commitProject">
+      <input
+        v-model="projectDraft"
+        class="kanban__input"
+        type="text"
+        :placeholder="t('kanban.projectName')"
+        autofocus
+      />
+      <button class="rp-btn" type="submit">{{ t('kanban.save') }}</button>
+      <button class="rp-btn" type="button" @click="creatingProject = false">{{ t('kanban.cancel') }}</button>
+    </form>
+
+    <div v-if="!project && !creatingProject" class="kanban__empty">
       <p class="kanban__empty-title">{{ t('kanban.emptyTitle') }}</p>
       <p class="kanban__empty-body">{{ t('kanban.emptyBody') }}</p>
+      <button class="rp-btn" type="button" @click="startProject">{{ t('kanban.newProject') }}</button>
     </div>
 
-    <div v-else class="kanban__board pg-body" role="list">
-      <section
-        v-for="col in columns"
-        :key="col.id"
-        class="kanban__col"
-        :class="{ 'kanban__col--over': overCol === col.id }"
-        :data-kanban-col="col.id"
-        role="list"
-        :aria-label="columnLabel(col)"
-      >
-        <header class="kanban__col-head">
-          <span>{{ columnLabel(col) }}</span>
-          <span class="kanban__count">{{ cardsIn(col).length }}</span>
-        </header>
-        <div class="kanban__cards">
-          <button
-            v-for="card in cardsIn(col)"
-            :key="card.path"
-            type="button"
-            class="kanban__card"
-            :class="{ 'kanban__card--dragging': dragging?.path === card.path }"
-            @pointerdown="onCardPointerDown($event, card.path)"
-            @click="openCard(card)"
-          >
-            <span class="kanban__card-title">{{ titleFor(card) }}</span>
-            <span class="kanban__card-path">{{ card.name }}</span>
-          </button>
-          <p v-if="cardsIn(col).length === 0" class="kanban__drop">{{ t('kanban.dropHere') }}</p>
-        </div>
-      </section>
-    </div>
+    <template v-else-if="project">
+      <div class="kanban__toolbar">
+        <input
+          v-if="renamingProject"
+          class="kanban__input"
+          :value="project.name"
+          @change="board.renameProject(project.id, ($event.target as HTMLInputElement).value); renamingProject = false"
+          @keydown.enter="board.renameProject(project.id, ($event.target as HTMLInputElement).value); renamingProject = false"
+        />
+        <button v-else class="kanban__rename" type="button" @click="renamingProject = true">
+          {{ project.name }}
+        </button>
+        <span class="kanban__hint">{{ t('kanban.hint') }}</span>
+      </div>
+
+      <div class="kanban__board pg-body" role="list">
+        <section
+          v-for="col in project.columns"
+          :key="col.id"
+          class="kanban__col"
+          :class="{ 'kanban__col--over': overCol === col.id }"
+          :data-kanban-col="col.id"
+          role="list"
+          :aria-label="col.title"
+        >
+          <header class="kanban__col-head">
+            <input
+              class="kanban__col-title"
+              :value="col.title"
+              :aria-label="t('kanban.columnName')"
+              @change="renameColumn(col.id, ($event.target as HTMLInputElement).value)"
+            />
+            <span class="kanban__count">{{ tasksIn(col.id).length }}</span>
+            <button class="kanban__icon" type="button" :title="t('kanban.deleteColumn')" :aria-label="t('kanban.deleteColumn')" @click="removeColumn(col.id)">
+              <Icons name="close" :size="14" />
+            </button>
+          </header>
+          <div class="kanban__cards">
+            <article
+              v-for="task in tasksIn(col.id)"
+              :key="task.id"
+              class="kanban__card"
+              :class="{ 'kanban__card--dragging': dragging === task.id }"
+              @pointerdown="onCardPointerDown($event, task.id)"
+              @click="openTask(task)"
+            >
+              <template v-if="editingId === task.id">
+                <input v-model="editTitle" class="kanban__input" type="text" :placeholder="t('kanban.taskTitle')" @click.stop @pointerdown.stop />
+                <textarea v-model="editNotes" class="kanban__notes" rows="3" :placeholder="t('kanban.taskNotes')" @click.stop @pointerdown.stop />
+                <div class="kanban__card-actions">
+                  <button class="rp-btn" type="button" @click.stop="saveTask">{{ t('kanban.save') }}</button>
+                  <button class="rp-btn" type="button" @click.stop="removeTask">{{ t('kanban.deleteTask') }}</button>
+                  <button class="rp-btn" type="button" @click.stop="editingId = null">{{ t('kanban.cancel') }}</button>
+                </div>
+              </template>
+              <template v-else>
+                <span class="kanban__card-title">{{ task.title }}</span>
+                <span v-if="task.notes" class="kanban__card-notes">{{ task.notes }}</span>
+              </template>
+            </article>
+            <p v-if="tasksIn(col.id).length === 0" class="kanban__drop">{{ t('kanban.noTasks') }}</p>
+          </div>
+          <form class="kanban__add" @submit.prevent="addTask(col.id)">
+            <input
+              v-model="taskDraft[col.id]"
+              class="kanban__input"
+              type="text"
+              :placeholder="t('kanban.newTask')"
+              @pointerdown.stop
+            />
+          </form>
+        </section>
+
+        <section class="kanban__col kanban__col--new">
+          <form v-if="addingColumn" class="kanban__add" @submit.prevent="commitColumn">
+            <input v-model="columnDraft" class="kanban__input" type="text" :placeholder="t('kanban.columnName')" autofocus />
+            <div class="kanban__card-actions">
+              <button class="rp-btn" type="submit">{{ t('kanban.save') }}</button>
+              <button class="rp-btn" type="button" @click="addingColumn = false">{{ t('kanban.cancel') }}</button>
+            </div>
+          </form>
+          <button v-else class="kanban__new-col" type="button" @click="addingColumn = true">{{ t('kanban.newColumn') }}</button>
+        </section>
+      </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
-.kanban__hint {
+.kanban__project {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.kanban__project-label,
+.kanban__hint,
+.kanban__count,
+.kanban__card-notes,
+.kanban__drop {
   font-size: 12px;
   color: var(--text-3);
-  max-width: 420px;
+}
+.kanban__select,
+.kanban__input,
+.kanban__notes,
+.kanban__col-title {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: var(--bd-hair);
+  border-radius: var(--r-sm);
+  padding: 4px 8px;
+}
+.kanban__select { max-width: 220px; }
+.kanban__create,
+.kanban__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 0;
+}
+.kanban__hint { margin-left: auto; max-width: 420px; }
+.kanban__rename {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
 }
 .kanban__empty {
   flex: 1;
@@ -225,7 +348,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
   padding: 32px;
   text-align: center;
   color: var(--text-3);
@@ -238,7 +361,7 @@ onBeforeUnmount(() => {
 }
 .kanban__empty-body {
   margin: 0;
-  max-width: 420px;
+  max-width: 440px;
   line-height: 1.6;
 }
 .kanban__board {
@@ -249,7 +372,7 @@ onBeforeUnmount(() => {
 }
 .kanban__col {
   flex: 1 1 220px;
-  min-width: 200px;
+  min-width: 220px;
   max-width: 320px;
   display: flex;
   flex-direction: column;
@@ -258,6 +381,12 @@ onBeforeUnmount(() => {
   border-radius: var(--r-lg);
   background: var(--fill-1);
 }
+.kanban__col--new {
+  background: transparent;
+  min-height: 0;
+  justify-content: flex-start;
+  padding: 8px;
+}
 .kanban__col--over {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
@@ -265,60 +394,62 @@ onBeforeUnmount(() => {
 .kanban__col-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-2);
+  gap: 6px;
+  padding: 8px;
 }
-.kanban__count {
-  font-variant-numeric: tabular-nums;
+.kanban__col-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  background: transparent;
+}
+.kanban__icon,
+.kanban__new-col {
+  border: 0;
+  background: transparent;
   color: var(--text-3);
-  font-weight: 500;
+  cursor: pointer;
+}
+.kanban__new-col {
+  padding: 8px;
+  text-align: left;
+  font: inherit;
 }
 .kanban__cards {
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 0 8px 10px;
-  min-height: 80px;
+  padding: 0 8px 8px;
+  min-height: 48px;
 }
 .kanban__card {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  align-items: stretch;
+  gap: 6px;
   width: 100%;
   padding: 10px 12px;
   border: var(--bd-hair);
   border-radius: var(--r-md);
   background: var(--bg);
   color: var(--text);
-  font: inherit;
   text-align: left;
   cursor: grab;
   touch-action: none;
 }
-.kanban__card:hover {
-  background: var(--bg-elev, var(--bg));
-}
-.kanban__card--dragging {
-  opacity: 0.45;
-}
-.kanban__card-title {
-  font-weight: 560;
+.kanban__card--dragging { opacity: 0.45; }
+.kanban__card-title { font-weight: 560; line-height: 1.4; }
+.kanban__card-notes {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   line-height: 1.4;
+  white-space: pre-wrap;
 }
-.kanban__card-path {
-  font-size: 11px;
-  color: var(--text-3);
-}
-.kanban__drop {
-  margin: 8px 4px;
-  font-size: 12px;
-  color: var(--text-3);
-  text-align: center;
-}
+.kanban__notes { width: 100%; resize: vertical; }
+.kanban__card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.kanban__add { display: flex; flex-direction: column; gap: 6px; padding: 0 8px 8px; }
+.kanban__drop { margin: 4px; text-align: center; }
 </style>

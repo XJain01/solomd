@@ -632,23 +632,26 @@ watch(stateKey, (k) => {
           <template v-if="agent.isStreaming">{{ t('agent.streaming') }}</template>
           <template v-else>{{ t('agent.enterToSend') }}</template>
         </span>
-        <button
-          v-if="agent.isStreaming"
-          class="rp-btn agent-panel__send agent-panel__send--stop"
-          type="button"
-          @click="stop"
-        >
-          {{ t('agent.stop') }}
-        </button>
-        <button
-          v-else
-          class="rp-btn rp-btn--primary agent-panel__send"
-          type="button"
-          :disabled="!canSend"
-          @click="send"
-        >
-          {{ t('agent.send') }}
-        </button>
+        <div class="agent-panel__compose-end">
+          <span class="agent-panel__char-count">{{ draft.length }}</span>
+          <button
+            v-if="agent.isStreaming"
+            class="rp-btn agent-panel__send agent-panel__send--stop"
+            type="button"
+            @click="stop"
+          >
+            {{ t('agent.stop') }}
+          </button>
+          <button
+            v-else
+            class="rp-btn rp-btn--primary agent-panel__send"
+            type="button"
+            :disabled="!canSend"
+            @click="send"
+          >
+            {{ t('agent.send') }}
+          </button>
+        </div>
       </div>
     </footer>
   </div>
@@ -944,10 +947,10 @@ watch(stateKey, (k) => {
   margin-top: 8px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
 }
 .agent-panel__compose-hint {
+  flex: 1 1 auto;
   min-width: 0;
   font-size: 12px;
   color: var(--text-3);
@@ -955,7 +958,24 @@ watch(stateKey, (k) => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.agent-panel__compose-end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.agent-panel__char-count {
+  flex: 0 0 auto;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-3);
+  white-space: nowrap;
+}
 .agent-panel__send {
-  flex-shrink: 0;
+  flex: 0 0 auto;
 }
 </style>

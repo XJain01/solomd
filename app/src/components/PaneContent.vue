@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import Editor from './Editor.vue';
 import Preview from './Preview.vue';
 import { useSettingsStore, clampSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../stores/settings';
@@ -8,7 +8,6 @@ import { useTilesStore } from '../stores/tiles';
 import { useTabsStore } from '../stores/tabs';
 import type { Tab } from '../types';
 import { isWindowsEditorRuntime, shouldUsePlainWindowsEditor } from '../lib/platform';
-import { IS_APP_STORE_BUILD } from '../lib/app-build';
 import {
   previewScrollMemory,
   tabCaretMemory,
@@ -16,8 +15,6 @@ import {
   tabViewportAnchorMemory,
   type ViewportLineAnchor,
 } from '../lib/scroll-memory';
-
-const AgentPanel = defineAsyncComponent(() => import('./AgentPanel.vue'));
 
 const props = defineProps<{
   paneId: string;
@@ -42,20 +39,12 @@ const showEditor = computed(
 );
 // `liveEdit` mode is editor-only: the inline-rendered markdown IS the
 // preview, so we don't show the separate Preview pane next to it.
-// `agent` uses the same split chrome, but the right pane is the chat.
 const showPreview = computed(
   () =>
     props.tab?.language === 'markdown' &&
     settings.viewMode !== 'edit' &&
     settings.viewMode !== 'liveEdit' &&
     settings.viewMode !== 'agent'
-);
-const showAgent = computed(
-  () =>
-    !IS_APP_STORE_BUILD &&
-    settings.viewMode === 'agent' &&
-    !!props.tab &&
-    (tiles.root.type === 'leaf' || tiles.focusedPaneId === props.paneId),
 );
 
 // Split view with live sync off: the preview renders what's on disk, so it
@@ -141,7 +130,7 @@ function gotoLine(line: number) {
 // the editor takes `splitRatio`% of the width. Pointer events, not HTML5 DnD:
 // the webview's native drag-drop handler swallows `draggable` drags.
 const isSplit = computed(
-  () => showEditor.value && (showPreview.value || showAgent.value),
+  () => showEditor.value && showPreview.value,
 );
 const contentEl = ref<HTMLElement | null>(null);
 // Live value while dragging; committed (and persisted) on pointerup so a drag
@@ -650,12 +639,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('solomd:edit-formula', onEditFormulaEvent);
 });
 
-function onAgentOpenSettings(section?: string) {
-  window.dispatchEvent(
-    new CustomEvent('solomd:open-settings', { detail: { section: section ?? 'integrations' } }),
-  );
-}
-
 defineExpose({ gotoLine, editorRef });
 
 // #350 — preview mode has no editor cursor to follow, so hand the preview's
@@ -755,7 +738,7 @@ function onPreviewSearchEvent(e: Event) {
     ref="contentEl"
     class="pane-content"
     :class="{
-      'pane-content--distinct': settings.distinctSplitPanes && showEditor && (showPreview || showAgent),
+      'pane-content--distinct': settings.distinctSplitPanes && showEditor && showPreview,
     }"
   >
     <div class="pane pane--editor" v-if="tab" v-show="showEditor" :style="editorPaneStyle">
@@ -794,12 +777,6 @@ function onPreviewSearchEvent(e: Event) {
         :file-path="tab.filePath"
         :tab-id="tab.id"
         @topline="onPreviewTopline"
-      />
-    </div>
-    <div class="pane pane--agent" v-if="showAgent && tab">
-      <AgentPanel
-        @open-settings="onAgentOpenSettings"
-        @close="settings.exitAgentMode()"
       />
     </div>
   </div>
