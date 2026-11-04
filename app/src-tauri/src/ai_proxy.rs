@@ -87,6 +87,35 @@ fn with_optional_bearer(rb: reqwest::RequestBuilder, key: &str) -> reqwest::Requ
     }
 }
 
+/// OpenCode Go rejects any request that does not identify its conversation:
+///
+///   400 {"type":"error","error":{"type":"MissingSessionID", ...}}
+///
+/// Console uses `x-opencode-session` to route a conversation to the same
+/// backend and reuse its prompt cache, so the value has to stay stable for
+/// the whole conversation — not per HTTP call. The agent loop reuses one
+/// `request_id` for every model call in a user turn, which is exactly the
+/// unit Console wants.
+///
+/// Go also asks clients to identify themselves with their own user agent
+/// instead of reqwest's default. Other providers never see either header.
+fn with_opencode_go_headers(
+    rb: reqwest::RequestBuilder,
+    provider: &str,
+    session: &str,
+) -> reqwest::RequestBuilder {
+    if resolve_provider(provider) != "opencode-go" {
+        return rb;
+    }
+    let session = if session.starts_with("ses_") {
+        session.to_string()
+    } else {
+        format!("ses_{session}")
+    };
+    rb.header("x-opencode-session", session)
+        .header("user-agent", concat!("SoloMD/", env!("CARGO_PKG_VERSION")))
+}
+
 /// Clean up a user-typed OpenAI-compatible base URL.
 ///
 /// The convention (same as the OpenAI SDK) is that the base already carries
@@ -383,6 +412,7 @@ fn drop_cancel_flag(id: &str) {
 /// text on failure so the UI can show it verbatim.
 async fn openai_chat_ping(
     client: &reqwest::Client,
+    provider: &str,
     base: &str,
     key: &str,
     model: Option<&str>,
@@ -397,11 +427,15 @@ async fn openai_chat_ping(
         "max_tokens": 1,
         "messages": [{"role": "user", "content": "ping"}]
     });
-    let res = with_optional_bearer(client.post(&url), key)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("network: {e}"))?;
+    let res = with_opencode_go_headers(
+        with_optional_bearer(client.post(&url), key),
+        provider,
+        &make_request_id(),
+    )
+    .json(&body)
+    .send()
+    .await
+    .map_err(|e| format!("network: {e}"))?;
     let status = res.status();
     if status.is_success() {
         Ok(format!("OK · {model} responded (endpoint has no /models list)"))
@@ -446,10 +480,14 @@ pub async fn ai_verify_key(
         "openai" => {
             let base = openai_base(base_url.as_deref());
             let url = format!("{base}/models");
-            let res = with_optional_bearer(client.get(&url), &key_str)
-                .send()
-                .await
-                .map_err(|e| format!("network: {e}"))?;
+            let res = with_opencode_go_headers(
+                with_optional_bearer(client.get(&url), &key_str),
+                &provider,
+                &make_request_id(),
+            )
+            .send()
+            .await
+            .map_err(|e| format!("network: {e}"))?;
             let status = res.status();
             if status.is_success() {
                 let body: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
@@ -474,7 +512,7 @@ pub async fn ai_verify_key(
             // completions work fine, and refusing to verify left those
             // users unable to finish setup. Ask the endpoint the question
             // that actually matters instead.
-            match openai_chat_ping(&client, &base, &key_str, model.as_deref()).await {
+            match openai_chat_ping(&client, &provider, &base, &key_str, model.as_deref()).await {
                 Ok(msg) => Ok(msg),
                 Err(ping_err) => Err(format!(
                     "HTTP {status}: {} · {ping_err}",
@@ -587,7 +625,14 @@ pub async fn ai_list_models(provider: String, base_url: Option<String>) -> Model
         }
     };
 
-    let resp = match with_optional_bearer(client.get(&url), &key).send().await {
+    let resp = match with_opencode_go_headers(
+        with_optional_bearer(client.get(&url), &key),
+        &provider,
+        &make_request_id(),
+    )
+    .send()
+    .await
+    {
         Ok(r) => r,
         Err(e) => {
             return ModelProbe {
@@ -1050,12 +1095,16 @@ async fn run_openai(
     });
 
     let client = http_client()?;
-    let resp = with_optional_bearer(client.post(&url), api_key)
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("openai request failed: {e}"))?;
+    let resp = with_opencode_go_headers(
+        with_optional_bearer(client.post(&url), api_key),
+        &req.provider,
+        request_id,
+    )
+    .header("content-type", "application/json")
+    .json(&body)
+    .send()
+    .await
+    .map_err(|e| format!("openai request failed: {e}"))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -1140,12 +1189,16 @@ async fn run_chat_openai(
     });
 
     let client = http_client()?;
-    let resp = with_optional_bearer(client.post(&url), api_key)
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("openai request failed: {e}"))?;
+    let resp = with_opencode_go_headers(
+        with_optional_bearer(client.post(&url), api_key),
+        &req.provider,
+        request_id,
+    )
+    .header("content-type", "application/json")
+    .json(&body)
+    .send()
+    .await
+    .map_err(|e| format!("openai request failed: {e}"))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -2437,17 +2490,23 @@ async fn openai_one_turn(
     };
 
     let client = http_client()?;
+    let provider = req.provider.clone();
     let send_once = |body: Value| {
         let url = url.clone();
         let api_key = api_key.to_string();
+        let provider = provider.clone();
         let client = client.clone();
         async move {
-            with_optional_bearer(client.post(&url), &api_key)
-                .header("content-type", "application/json")
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| format!("openai request failed: {e}"))
+            with_opencode_go_headers(
+                with_optional_bearer(client.post(&url), &api_key),
+                &provider,
+                request_id,
+            )
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("openai request failed: {e}"))
         }
     };
 
@@ -2746,6 +2805,40 @@ mod tests {
             Some("https://api.example.com/v1"),
         );
         assert_eq!(super::normalize_openai_base("   "), None);
+    }
+
+    #[test]
+    fn opencode_go_requests_carry_a_stable_session_header() {
+        let client = super::http_client().unwrap();
+        let req = super::with_opencode_go_headers(
+            client.post("http://localhost/"),
+            "opencode-go",
+            "turn-1",
+        )
+        .build()
+        .unwrap();
+        assert_eq!(req.headers()["x-opencode-session"], "ses_turn-1");
+        assert!(req.headers()["user-agent"]
+            .to_str()
+            .unwrap()
+            .starts_with("SoloMD/"));
+
+        // An id that already has the Console prefix is not doubled.
+        let req = super::with_opencode_go_headers(
+            client.post("http://localhost/"),
+            "opencode-go",
+            "ses_abc",
+        )
+        .build()
+        .unwrap();
+        assert_eq!(req.headers()["x-opencode-session"], "ses_abc");
+
+        // Every other provider stays untouched.
+        let req =
+            super::with_opencode_go_headers(client.post("http://localhost/"), "openai", "turn-1")
+                .build()
+                .unwrap();
+        assert!(req.headers().get("x-opencode-session").is_none());
     }
 
     #[test]

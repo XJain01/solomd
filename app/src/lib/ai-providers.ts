@@ -231,11 +231,13 @@ export const PROVIDERS: ProviderConfig[] = [
     id: 'opencode-go',
     label: 'OpenCode Go (订阅聚合)',
     apiFormat: 'openai',
-    defaultModel: 'deepseek-v4-flash',
+    defaultModel: 'deepseek-v4.1-flash',
     defaultBaseUrl: 'https://opencode.ai/zen/go/v1',
-    // Full model list from GET /zen/go/v1/models (verified 2026-08-12).
+    // Live list from GET /zen/go/v1/models (verified 2026-11-04). The
+    // gateway also serves /inference/go/openai/v1; both speak the same wire
+    // format, and `zen` is the one whose /models endpoint answers.
     modelHint:
-      'deepseek-v4-flash · deepseek-v4-pro · mimo-v2.5 · mimo-v2.5-pro · mimo-v2-pro · mimo-v2-omni · qwen3.8-max · qwen3.7-max · qwen3.7-plus · qwen3.6-plus · qwen3.5-plus · glm-5.2 · glm-5.1 · glm-5 · kimi-k3 · kimi-k2.7-code · kimi-k2.6 · kimi-k2.5 · minimax-m3 · gpt-5.6-luna · grok-4.5 · hy3',
+      'deepseek-v4.1-flash · deepseek-v4-pro · glm-5.3 · glm-5.3-flash · glm-5.2 · kimi-k3.1-pro · kimi-k3 · kimi-k2.7-code · qwen3.8-max · qwen3.8-flash · qwen3.7-plus · minimax-m3.1-flash · minimax-m3 · gpt-6-luna · gpt-5.6-luna · claude-haiku-5-5 · gemini-4-argon · grok-4.7 · mimo-v2.6-pro · mimo-v2.6-flash · hy4-preview · hy3 · longcat-2.0 · step-5-preview',
     signupUrl: 'https://opencode.ai/auth',
   },
   // ---- Local ---------------------------------------------------------

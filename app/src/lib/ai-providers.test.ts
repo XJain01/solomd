@@ -10,9 +10,12 @@ test('MiniMax offers Flash first and M3 without changing the wire format or endp
   assert.equal(provider.defaultBaseUrl, 'https://api.minimax.io/v1');
 });
 
-test('OpenCode Go retains its default and only advertises its verified MiniMax M3 route', () => {
+test('OpenCode Go tracks the live gateway catalogue', () => {
   const provider = providerById('opencode-go')!;
-  assert.equal(provider.defaultModel, 'deepseek-v4-flash');
+  assert.equal(provider.defaultModel, 'deepseek-v4.1-flash');
   assert.equal(provider.defaultBaseUrl, 'https://opencode.ai/zen/go/v1');
-  assert.deepEqual(provider.modelHint!.split(' · ').filter((id) => id.startsWith('minimax-')), ['minimax-m3']);
+  assert.deepEqual(
+    provider.modelHint!.split(' · ').filter((id) => id.startsWith('minimax-')),
+    ['minimax-m3.1-flash', 'minimax-m3'],
+  );
 });
