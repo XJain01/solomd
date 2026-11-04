@@ -8,6 +8,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core';
 import '../styles/panels.css';
 import Icons from './Icons.vue';
+import { DsSelect, type DsSelectOption } from '../ui';
 import { useI18n } from '../i18n';
 import { useSettingsStore } from '../stores/settings';
 import { useWorkspaceStore } from '../stores/workspace';
@@ -78,6 +79,9 @@ let unlistenClose: UnlistenFn | null = null;
 let closingWindow = false;
 
 const hasFolder = computed(() => !!workspace.currentFolder);
+const drawingOptions = computed<DsSelectOption[]>(() =>
+  drawings.value.map((file) => ({ value: file.path, label: drawingTitle(file.name) })),
+);
 
 function joinPath(folder: string, ...parts: string[]): string {
   const sep = folder.includes('\\') && !folder.includes('/') ? '\\' : '/';
@@ -355,16 +359,12 @@ onBeforeUnmount(() => {
       </button>
       <h1 class="pg-title">{{ t('drawing.heading') }}</h1>
       <span v-if="drawings.length" class="drawing__picker">
-        <select
-          class="kanban__select"
-          :value="activePath || ''"
-          :aria-label="t('drawing.heading')"
-          @change="selectDrawing(($event.target as HTMLSelectElement).value)"
-        >
-          <option v-for="file in drawings" :key="file.path" :value="file.path">
-            {{ drawingTitle(file.name) }}
-          </option>
-        </select>
+        <DsSelect
+          :model-value="activePath || ''"
+          :options="drawingOptions"
+          size="sm"
+          @update:model-value="selectDrawing"
+        />
       </span>
       <span class="pg-spacer" />
       <span class="drawing__actions">
@@ -412,7 +412,7 @@ onBeforeUnmount(() => {
   height: 100%;
   min-height: 0;
 }
-.drawing__picker { min-width: 0; }
+.drawing__picker { width: 220px; min-width: 0; }
 .drawing__actions { display: inline-flex; gap: 6px; }
 .drawing__create {
   display: flex;

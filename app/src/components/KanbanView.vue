@@ -5,6 +5,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Icons from './Icons.vue';
+import { DsSelect, type DsSelectOption } from '../ui';
 import '../styles/panels.css';
 import { useI18n } from '../i18n';
 import { useKanbanStore } from '../stores/kanban';
@@ -20,6 +21,19 @@ const files = useFiles();
 
 const project = computed(() =>
   board.projects.find((p) => p.id === board.activeProjectId) ?? board.projects[0] ?? null,
+);
+
+const projectOptions = computed<DsSelectOption[]>(() =>
+  board.projects.map((item) => ({ value: item.id, label: item.name })),
+);
+const priorityOptions = computed<DsSelectOption[]>(() => [
+  { value: '', label: t('kanban.noPriority') },
+  { value: 'P0', label: 'P0' },
+  { value: 'P1', label: 'P1' },
+  { value: 'P2', label: 'P2' },
+]);
+const statusOptions = computed<DsSelectOption[]>(() =>
+  (project.value?.columns ?? []).map((col) => ({ value: col.id, label: col.title })),
 );
 
 const creatingProject = ref(false);
@@ -366,14 +380,14 @@ onBeforeUnmount(() => {
           @keydown.esc.prevent="cancelProjectRename"
         />
         <template v-else>
-          <select
-            class="kanban__select"
-            :value="project.id"
-            :aria-label="t('kanban.projects')"
-            @change="board.setActive(($event.target as HTMLSelectElement).value)"
-          >
-            <option v-for="item in board.projects" :key="item.id" :value="item.id">{{ item.name }}</option>
-          </select>
+          <span class="kanban__project-picker">
+            <DsSelect
+              :model-value="project.id"
+              :options="projectOptions"
+              size="sm"
+              @update:model-value="board.setActive"
+            />
+          </span>
           <button
             class="pg-icon-btn"
             type="button"
@@ -572,18 +586,11 @@ onBeforeUnmount(() => {
             <div class="kanban__field-row">
               <label class="kanban__field">
                 <span>{{ t('kanban.priority') }}</span>
-                <select v-model="detailPriority" class="kanban__select">
-                  <option value="">{{ t('kanban.noPriority') }}</option>
-                  <option value="P0">P0</option>
-                  <option value="P1">P1</option>
-                  <option value="P2">P2</option>
-                </select>
+                <DsSelect v-model="detailPriority" :options="priorityOptions" size="sm" />
               </label>
               <label class="kanban__field">
                 <span>{{ t('kanban.status') }}</span>
-                <select v-model="detailColumnId" class="kanban__select">
-                  <option v-for="col in project?.columns || []" :key="col.id" :value="col.id">{{ col.title }}</option>
-                </select>
+                <DsSelect v-model="detailColumnId" :options="statusOptions" size="sm" />
               </label>
             </div>
             <div class="kanban__field">
@@ -676,6 +683,10 @@ onBeforeUnmount(() => {
 .kanban__project-name {
   width: 200px;
   max-width: 220px;
+}
+.kanban__project-picker {
+  display: inline-flex;
+  width: 200px;
 }
 .kanban__create {
   display: flex;
