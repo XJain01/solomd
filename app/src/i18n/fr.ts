@@ -2384,6 +2384,7 @@ export const fr: I18n = {
     today: "Aujourd’hui",
     inbox: "Boîte de réception",
     kanban: "Kanban",
+    drawing: 'Drawing board',
     inboxFilterOn: "N’afficher que les notes de la boîte de réception",
     inboxFilterOff: "Afficher tous les fichiers dans l’arborescence",
     inboxFilterActive: "Notes de la boîte de réception uniquement",
@@ -2448,4 +2449,18 @@ export const fr: I18n = {
     colDone: "Done",
   },
 
+  drawing: {
+    heading: 'Drawing board',
+    back: 'Back to editor',
+    new: 'New drawing',
+    delete: 'Delete drawing',
+    namePlaceholder: 'Drawing name',
+    save: 'Save',
+    cancel: 'Cancel',
+    emptyTitle: 'No drawings yet',
+    emptyBody: 'Create a drawing. Files live in drawings/ as .excalidraw and sync with your vault.',
+    noFolder: 'Open a folder to draw.',
+    loading: 'Loading drawing…',
+    confirmDelete: 'Delete this drawing?',
+  },
 };

@@ -30,6 +30,23 @@ const katexPluginStub: Plugin = {
 export default defineConfig(async () => ({
   plugins: [katexPluginStub, vue()],
 
+  // Excalidraw reads process.env.IS_PREACT at runtime; Vite strips process
+  // otherwise. We use the React build, so false (not "true").
+  define: {
+    'process.env.IS_PREACT': JSON.stringify('false'),
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      // Excalidraw ships locale modules with arbitrary module namespace
+      // identifiers (export { english as "en-us" }), which needs ES2022.
+      target: 'es2022',
+      treeShaking: true,
+    },
+  },
+  build: {
+    target: 'es2022',
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

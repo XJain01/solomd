@@ -2401,6 +2401,7 @@ export const uk: I18n = {
     today: "Сьогодні",
     inbox: "Вхідні",
     kanban: "Канбан",
+    drawing: 'Drawing board',
     inboxFilterOn: "Показувати в дереві лише вхідні нотатки",
     inboxFilterOff: "Показувати в дереві всі файли",
     inboxFilterActive: "Лише вхідні нотатки",
@@ -2465,4 +2466,18 @@ export const uk: I18n = {
     colDone: "Done",
   },
 
+  drawing: {
+    heading: 'Drawing board',
+    back: 'Back to editor',
+    new: 'New drawing',
+    delete: 'Delete drawing',
+    namePlaceholder: 'Drawing name',
+    save: 'Save',
+    cancel: 'Cancel',
+    emptyTitle: 'No drawings yet',
+    emptyBody: 'Create a drawing. Files live in drawings/ as .excalidraw and sync with your vault.',
+    noFolder: 'Open a folder to draw.',
+    loading: 'Loading drawing…',
+    confirmDelete: 'Delete this drawing?',
+  },
 };

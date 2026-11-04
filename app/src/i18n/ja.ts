@@ -2384,6 +2384,7 @@ export const ja: I18n = {
     today: "今日",
     inbox: "受信箱",
     kanban: "カンバン",
+    drawing: 'Drawing board',
     inboxFilterOn: "ツリーに受信箱のノートだけを表示",
     inboxFilterOff: "ツリーにすべてのファイルを表示",
     inboxFilterActive: "受信箱のノートのみ表示中",
@@ -2448,4 +2449,18 @@ export const ja: I18n = {
     colDone: "Done",
   },
 
+  drawing: {
+    heading: 'Drawing board',
+    back: 'Back to editor',
+    new: 'New drawing',
+    delete: 'Delete drawing',
+    namePlaceholder: 'Drawing name',
+    save: 'Save',
+    cancel: 'Cancel',
+    emptyTitle: 'No drawings yet',
+    emptyBody: 'Create a drawing. Files live in drawings/ as .excalidraw and sync with your vault.',
+    noFolder: 'Open a folder to draw.',
+    loading: 'Loading drawing…',
+    confirmDelete: 'Delete this drawing?',
+  },
 };

@@ -2375,6 +2375,7 @@ export const ru: I18n = {
     today: "Сегодня",
     inbox: "Входящие",
     kanban: "Канбан",
+    drawing: 'Drawing board',
     inboxFilterOn: "Показывать в дереве только входящие заметки",
     inboxFilterOff: "Показывать в дереве все файлы",
     inboxFilterActive: "Только входящие заметки",
@@ -2439,4 +2440,18 @@ export const ru: I18n = {
     colDone: "Done",
   },
 
+  drawing: {
+    heading: 'Drawing board',
+    back: 'Back to editor',
+    new: 'New drawing',
+    delete: 'Delete drawing',
+    namePlaceholder: 'Drawing name',
+    save: 'Save',
+    cancel: 'Cancel',
+    emptyTitle: 'No drawings yet',
+    emptyBody: 'Create a drawing. Files live in drawings/ as .excalidraw and sync with your vault.',
+    noFolder: 'Open a folder to draw.',
+    loading: 'Loading drawing…',
+    confirmDelete: 'Delete this drawing?',
+  },
 };

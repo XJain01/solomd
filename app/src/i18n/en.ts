@@ -2413,6 +2413,7 @@ export const en = {
     today: "Today",
     inbox: "Inbox",
     kanban: "Kanban",
+    drawing: "Drawing board",
     inboxFilterOn: "Show only inbox notes in the tree",
     inboxFilterOff: "Show all files in the tree",
     inboxFilterActive: "Showing inbox notes only",
@@ -2475,6 +2476,21 @@ export const en = {
     colTodo: "To do",
     colDoing: "Doing",
     colDone: "Done",
+  },
+
+  drawing: {
+    heading: "Drawing board",
+    back: "Back to editor",
+    new: "New drawing",
+    delete: "Delete drawing",
+    namePlaceholder: "Drawing name",
+    save: "Save",
+    cancel: "Cancel",
+    emptyTitle: "No drawings yet",
+    emptyBody: "Create a drawing. Files live in drawings/ as .excalidraw and sync with your vault.",
+    noFolder: "Open a folder to draw.",
+    loading: "Loading drawing…",
+    confirmDelete: "Delete this drawing?",
   },
 };
 

@@ -2388,6 +2388,7 @@ export const zh: I18n = {
     today: "今天",
     inbox: "收件箱",
     kanban: "看板",
+    drawing: "手绘画板",
     inboxFilterOn: "文件树中只显示收件箱笔记",
     inboxFilterOff: "文件树中显示全部文件",
     inboxFilterActive: "仅显示收件箱笔记",
@@ -2450,5 +2451,20 @@ export const zh: I18n = {
     colTodo: "待办",
     colDoing: "进行中",
     colDone: "完成",
+  },
+
+  drawing: {
+    heading: "手绘画板",
+    back: "返回编辑器",
+    new: "新建画板",
+    delete: "删除画板",
+    namePlaceholder: "画板名称",
+    save: "保存",
+    cancel: "取消",
+    emptyTitle: "还没有画板",
+    emptyBody: "新建一个画板。文件保存在 drawings/ 下，格式为 .excalidraw，会随 vault 同步。",
+    noFolder: "请先打开一个文件夹再画图。",
+    loading: "正在加载画板…",
+    confirmDelete: "删除这个画板？",
   },
 };

@@ -2401,6 +2401,7 @@ export const sv: I18n = {
     today: "Idag",
     inbox: "Inkorg",
     kanban: "Kanban",
+    drawing: 'Drawing board',
     inboxFilterOn: "Visa bara inkorgsanteckningar i trädet",
     inboxFilterOff: "Visa alla filer i trädet",
     inboxFilterActive: "Bara inkorgsanteckningar",
@@ -2465,4 +2466,18 @@ export const sv: I18n = {
     colDone: "Done",
   },
 
+  drawing: {
+    heading: 'Drawing board',
+    back: 'Back to editor',
+    new: 'New drawing',
+    delete: 'Delete drawing',
+    namePlaceholder: 'Drawing name',
+    save: 'Save',
+    cancel: 'Cancel',
+    emptyTitle: 'No drawings yet',
+    emptyBody: 'Create a drawing. Files live in drawings/ as .excalidraw and sync with your vault.',
+    noFolder: 'Open a folder to draw.',
+    loading: 'Loading drawing…',
+    confirmDelete: 'Delete this drawing?',
+  },
 };

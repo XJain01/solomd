@@ -2384,6 +2384,7 @@ export const ko: I18n = {
     today: "오늘",
     inbox: "받은 편지함",
     kanban: "칸반",
+    drawing: 'Drawing board',
     inboxFilterOn: "트리에 받은 편지함 노트만 표시",
     inboxFilterOff: "트리에 모든 파일 표시",
     inboxFilterActive: "받은 편지함 노트만 표시 중",
@@ -2448,4 +2449,18 @@ export const ko: I18n = {
     colDone: "Done",
   },
 
+  drawing: {
+    heading: 'Drawing board',
+    back: 'Back to editor',
+    new: 'New drawing',
+    delete: 'Delete drawing',
+    namePlaceholder: 'Drawing name',
+    save: 'Save',
+    cancel: 'Cancel',
+    emptyTitle: 'No drawings yet',
+    emptyBody: 'Create a drawing. Files live in drawings/ as .excalidraw and sync with your vault.',
+    noFolder: 'Open a folder to draw.',
+    loading: 'Loading drawing…',
+    confirmDelete: 'Delete this drawing?',
+  },
 };

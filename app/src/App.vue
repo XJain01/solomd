@@ -41,7 +41,9 @@ import { BASES_OPEN_EVENT, BASES_CLOSE_EVENT } from './composables/useBasesView'
 const InboxView = defineAsyncComponent(() => import('./components/InboxView.vue'));
 import { INBOX_OPEN_EVENT, INBOX_CLOSE_EVENT } from './composables/useInboxView';
 const KanbanView = defineAsyncComponent(() => import('./components/KanbanView.vue'));
+const DrawingBoardView = defineAsyncComponent(() => import('./components/DrawingBoardView.vue'));
 import { KANBAN_OPEN_EVENT, KANBAN_CLOSE_EVENT } from './composables/useKanbanView';
+import { DRAWING_OPEN_EVENT, DRAWING_CLOSE_EVENT } from './composables/useDrawingView';
 // v4.6.1 F2 — Type lens (center-pane filtered view of one type's members).
 const TypeLensView = defineAsyncComponent(() => import('./components/TypeLensView.vue'));
 import { TYPE_LENS_OPEN_EVENT, TYPE_LENS_CLOSE_EVENT } from './composables/useTypeLens';
@@ -1663,18 +1665,28 @@ function onAIRewriteAccept(e: Event) {
 function onAIRewriteCancel() {
   // No-op for now; AIRewriteOverlay self-closes.
 }
-function onOpenBases() { basesOpen.value = true; viewOpen.value = false; typeLensOpen.value = false; kanbanOpen.value = false; }
+function onOpenBases() { basesOpen.value = true; viewOpen.value = false; typeLensOpen.value = false; kanbanOpen.value = false; drawingOpen.value = false; }
 function onCloseBases() { basesOpen.value = false; }
-function onOpenInbox() { inboxViewOpen.value = true; kanbanOpen.value = false; typeLensOpen.value = false; }
+function onOpenInbox() { inboxViewOpen.value = true; kanbanOpen.value = false; drawingOpen.value = false; typeLensOpen.value = false; }
 function onCloseInbox() { inboxViewOpen.value = false; }
 function onOpenKanban() {
   kanbanOpen.value = true;
+  drawingOpen.value = false;
   inboxViewOpen.value = false;
   basesOpen.value = false;
   typeLensOpen.value = false;
   viewOpen.value = false;
 }
 function onCloseKanban() { kanbanOpen.value = false; }
+function onOpenDrawing() {
+  drawingOpen.value = true;
+  kanbanOpen.value = false;
+  inboxViewOpen.value = false;
+  basesOpen.value = false;
+  typeLensOpen.value = false;
+  viewOpen.value = false;
+}
+function onCloseDrawing() { drawingOpen.value = false; }
 // A board is a centre-pane overlay, not a tab. Opening or activating any file
 // must leave it — otherwise every file click keeps showing the board. The
 // tabs store already emits `leave-center-overlay`, but this watch also covers
@@ -1683,6 +1695,7 @@ watch(
   [() => tabs.activeId, () => tabs.activeTab?.filePath],
   () => {
     if (kanbanOpen.value) kanbanOpen.value = false;
+    if (drawingOpen.value) drawingOpen.value = false;
   },
 );
 // v4.6.1 F2 — type lens content swap. Mutually exclusive with the other
@@ -1697,11 +1710,12 @@ function onOpenTypeLens(e: Event) {
   basesOpen.value = false;
   inboxViewOpen.value = false;
   kanbanOpen.value = false;
+  drawingOpen.value = false;
   viewOpen.value = false;
 }
 function onCloseTypeLens() { typeLensOpen.value = false; }
 // v4.6 F5 — saved-view content swap.
-function onOpenView() { viewOpen.value = true; basesOpen.value = false; typeLensOpen.value = false; kanbanOpen.value = false; }
+function onOpenView() { viewOpen.value = true; basesOpen.value = false; typeLensOpen.value = false; kanbanOpen.value = false; drawingOpen.value = false; }
 function onCloseView() { viewOpen.value = false; }
 
 async function onWikiOpen(e: Event) {
@@ -1775,6 +1789,7 @@ function onOpenAgentWizard() {
 function onLeaveCenterOverlay() {
   if (inboxViewOpen.value) inboxViewOpen.value = false;
   if (kanbanOpen.value) kanbanOpen.value = false;
+  if (drawingOpen.value) drawingOpen.value = false;
   if (basesOpen.value) basesOpen.value = false;
   if (typeLensOpen.value) typeLensOpen.value = false;
   if (viewOpen.value) viewOpen.value = false;
@@ -1789,6 +1804,8 @@ window.addEventListener(INBOX_OPEN_EVENT, onOpenInbox as EventListener);
 window.addEventListener(INBOX_CLOSE_EVENT, onCloseInbox as EventListener);
 window.addEventListener(KANBAN_OPEN_EVENT, onOpenKanban as EventListener);
 window.addEventListener(KANBAN_CLOSE_EVENT, onCloseKanban as EventListener);
+window.addEventListener(DRAWING_OPEN_EVENT, onOpenDrawing as EventListener);
+window.addEventListener(DRAWING_CLOSE_EVENT, onCloseDrawing as EventListener);
 window.addEventListener(TYPE_LENS_OPEN_EVENT, onOpenTypeLens as EventListener);
 window.addEventListener(TYPE_LENS_CLOSE_EVENT, onCloseTypeLens as EventListener);
 window.addEventListener(VIEW_OPEN_EVENT, onOpenView as EventListener);
@@ -1824,6 +1841,8 @@ onBeforeUnmount(() => {
   window.removeEventListener(INBOX_CLOSE_EVENT, onCloseInbox as EventListener);
   window.removeEventListener(KANBAN_OPEN_EVENT, onOpenKanban as EventListener);
   window.removeEventListener(KANBAN_CLOSE_EVENT, onCloseKanban as EventListener);
+  window.removeEventListener(DRAWING_OPEN_EVENT, onOpenDrawing as EventListener);
+  window.removeEventListener(DRAWING_CLOSE_EVENT, onCloseDrawing as EventListener);
   window.removeEventListener(TYPE_LENS_OPEN_EVENT, onOpenTypeLens as EventListener);
   window.removeEventListener(TYPE_LENS_CLOSE_EVENT, onCloseTypeLens as EventListener);
   window.removeEventListener(VIEW_OPEN_EVENT, onOpenView as EventListener);
@@ -2041,6 +2060,7 @@ watch(
     if (v !== 'home') return;
     inboxViewOpen.value = false;
     kanbanOpen.value = false;
+    drawingOpen.value = false;
     basesOpen.value = false;
     typeLensOpen.value = false;
   },
@@ -2315,6 +2335,7 @@ function onSidebarResize(side: 'left' | 'right', ev: MouseEvent) {
 const basesOpen = ref(false);
 const inboxViewOpen = ref(false);
 const kanbanOpen = ref(false);
+const drawingOpen = ref(false);
 // v4.6.1 F2 — type lens (full-pane filtered list of one type's members).
 const typeLensOpen = ref(false);
 const typeLensName = ref('');
@@ -2486,11 +2507,12 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
         <div class="content">
           <BasesView v-if="basesOpen" />
           <InboxView v-else-if="inboxViewOpen" />
+          <DrawingBoardView v-else-if="drawingOpen" />
           <KanbanView v-else-if="kanbanOpen" />
           <TypeLensView v-else-if="typeLensOpen" :type-name="typeLensName" />
           <ViewNoteList v-else-if="viewPaneVisible" />
           <TileRoot v-else :node="tiles.root" @cursor="onCursor" @selection="onSelection" />
-          <StatsPill v-if="!basesOpen && !inboxViewOpen && !kanbanOpen && !typeLensOpen && !viewPaneVisible" :line="cursorLine" :col="cursorCol" :selection-text="selectionText" />
+          <StatsPill v-if="!basesOpen && !inboxViewOpen && !kanbanOpen && !drawingOpen && !typeLensOpen && !viewPaneVisible" :line="cursorLine" :col="cursorCol" :selection-text="selectionText" />
         </div>
         <!-- The agent dock is a column of its own, not a pane of the read-only
              strip: opening the chat used to bring backlinks / tags / outline
