@@ -483,7 +483,7 @@ onBeforeUnmount(() => {
                   v-if="task.due"
                   class="kanban__due"
                   :class="{ 'kanban__due--overdue': isOverdue(task.due) }"
-                >{{ task.due.slice(5) }}</span>
+                >{{ task.due }}</span>
                 <span v-if="task.checklist && task.checklist.length" class="kanban__progress">
                   <Icons name="check" :size="10" /> {{ checklistDone(task) }}/{{ task.checklist.length }}
                 </span>
@@ -868,8 +868,17 @@ onBeforeUnmount(() => {
 .kanban__prio--P0 { background: #e5484d; }
 .kanban__prio--P1 { background: #e07b39; }
 .kanban__prio--P2 { background: #5b8def; }
-.kanban__due { font-variant-numeric: tabular-nums; }
-.kanban__due--overdue { color: var(--danger); font-weight: 600; }
+.kanban__due {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--fill-1);
+  font-variant-numeric: tabular-nums;
+}
+.kanban__due--overdue {
+  color: var(--danger);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
 .kanban__progress {
   display: inline-flex;
   align-items: center;
@@ -891,7 +900,7 @@ onBeforeUnmount(() => {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--accent);
+  background: #5b8def;
   transition: width 180ms var(--ease);
 }
 .kanban__count--over { color: var(--danger); font-weight: 700; }
