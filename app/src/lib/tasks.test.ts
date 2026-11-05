@@ -13,6 +13,7 @@ import {
   localDateKey,
   compareTasks,
   toggleTaskLine,
+  taskMarkerInLine,
 } from './tasks';
 
 test('plain text has no metadata', () => {
@@ -115,4 +116,22 @@ test('toggling a line that is not a task refuses rather than corrupting it', () 
 test('toggling preserves indentation and marker style', () => {
   assert.equal(toggleTaskLine('  * [ ] nested', 1), '  * [x] nested');
   assert.equal(toggleTaskLine('+ [X] done', 1), '+ [ ] done');
+});
+
+test('taskMarkerInLine finds the marker inside a callout quote', () => {
+  const line = '> - [ ] UI换皮';
+  const marker = taskMarkerInLine(line);
+  assert.ok(marker);
+  assert.equal(line[marker.index], ' ');
+  assert.equal(marker.checked, false);
+  assert.equal(line[marker.index - 1], '[');
+  assert.equal(line[marker.index + 1], ']');
+});
+
+test('taskMarkerInLine flips checked state and handles nesting', () => {
+  assert.equal(taskMarkerInLine('> - [x] done')?.checked, true);
+  assert.equal(taskMarkerInLine('> > - [X] nested')?.checked, true);
+  assert.equal(taskMarkerInLine('   * [ ] indented')?.checked, false);
+  assert.equal(taskMarkerInLine('> plain quote'), null);
+  assert.equal(taskMarkerInLine('> [!note]'), null);
 });

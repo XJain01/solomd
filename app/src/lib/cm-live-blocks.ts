@@ -47,6 +47,7 @@ import {
 } from './image-resolve';
 import { renderMarkdown, extractImageRoot } from './markdown';
 import { calloutEndLine } from './callouts';
+import { taskMarkerInLine } from './tasks';
 import { findHtmlBlockEnd } from './html-live-render';
 import { openRenderedLink } from './link-open';
 import {
@@ -533,29 +534,105 @@ class HtmlBlockWidget extends WidgetType {
 /** Obsidian callout, rendered with the same pipeline as the preview. */
 class CalloutWidget extends WidgetType {
   private readonly source: string;
+  /** 1-based doc line of the callout's first line; task clicks map through it. */
+  private readonly startLine: number;
 
-  constructor(source: string) {
+  constructor(source: string, startLine: number) {
     super();
     this.source = source;
+    this.startLine = startLine;
   }
 
   eq(other: CalloutWidget): boolean {
-    return other.source === this.source;
+    return other.source === this.source && other.startLine === this.startLine;
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('div');
     wrap.className = 'cm-live-block cm-live-block--callout';
     // The editor content is `white-space: pre`. Without this, each body
     // line's `<br>` plus the newline markdown-it emits becomes a blank row.
     wrap.style.whiteSpace = 'normal';
     wrap.innerHTML = renderMarkdown(this.source);
+    this.wireTaskCheckboxes(view, wrap);
     return wrap;
+  }
+
+  /**
+   * The preview pipeline emits `disabled` task checkboxes (the preview pane
+   * re-enables them and maps clicks back through `data-line`). A live callout
+   * has no such path: a disabled box could not be ticked at all, and a plain
+   * click on the body revealed the source instead. Enable them and flip the
+   * matching `[ ]` in the document, keeping the callout rendered.
+   */
+  private wireTaskCheckboxes(view: EditorView, wrap: HTMLElement): void {
+    const boxes = Array.from(
+      wrap.querySelectorAll<HTMLInputElement>('input.task-list-item-checkbox'),
+    );
+    for (const box of boxes) {
+      box.disabled = false;
+      box.tabIndex = -1;
+      box.style.cursor = 'pointer';
+      // Keep the caret where it was: without this the click moves the
+      // selection into the callout and reveals the raw Markdown.
+      box.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      box.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.toggleTask(view, box, boxes);
+      });
+    }
+  }
+
+  private toggleTask(
+    view: EditorView,
+    box: HTMLInputElement,
+    boxes: HTMLInputElement[],
+  ): void {
+    const lineNumber = this.taskLine(box, boxes);
+    if (lineNumber === null || lineNumber > view.state.doc.lines) return;
+    const line = view.state.doc.line(lineNumber);
+    const marker = taskMarkerInLine(line.text);
+    if (!marker) return;
+    view.dispatch({
+      changes: {
+        from: line.from + marker.index,
+        to: line.from + marker.index + 1,
+        insert: marker.checked ? ' ' : 'x',
+      },
+    });
+  }
+
+  /**
+   * Document line of the task behind `box`. `data-line` is 1-based within the
+   * callout source; the ordinal fallback covers markup rendered before that
+   * attribute existed.
+   */
+  private taskLine(box: HTMLInputElement, boxes: HTMLInputElement[]): number | null {
+    const rel = Number(box.closest('li.task-list-item')?.getAttribute('data-line') ?? '');
+    if (Number.isFinite(rel) && rel > 0) return this.startLine + rel - 1;
+    const ordinal = boxes.indexOf(box);
+    let seen = 0;
+    for (const [index, text] of this.source.split('\n').entries()) {
+      if (!taskMarkerInLine(text)) continue;
+      if (seen === ordinal) return this.startLine + index;
+      seen += 1;
+    }
+    return null;
   }
 
   ignoreEvent(event: Event): boolean {
     const node = event.target instanceof Node ? event.target : null;
     const el = node instanceof Element ? node : node?.parentElement;
+    if (
+      (event.type === 'mousedown' || event.type === 'click') &&
+      el?.closest('input.task-list-item-checkbox')
+    ) {
+      return true;
+    }
     return !!el?.closest('summary, .md-callout__title');
   }
 }
@@ -1354,7 +1431,7 @@ function buildBlockDecorations(state: EditorState, opts: BlockOptions): Decorati
                 blockFrom,
                 blockTo,
                 Decoration.replace({
-                  widget: new CalloutWidget(doc.sliceString(blockFrom, blockTo)),
+                  widget: new CalloutWidget(doc.sliceString(blockFrom, blockTo), i),
                   block: true,
                 }),
               );

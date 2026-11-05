@@ -37,7 +37,7 @@
  */
 
 import { syntaxTree, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import type { Range } from '@codemirror/state';
+import type { EditorState, Range } from '@codemirror/state';
 
 // Minimal structural view of a lezer `SyntaxNode`. `@lezer/common` is only a
 // transitive dependency (not in our package.json), so we describe just the
@@ -59,6 +59,7 @@ import {
   WidgetType,
 } from '@codemirror/view';
 import { frozenDuringComposition, isImeSafeFlushTransaction } from './cm-ime-guard';
+import { parseCalloutMarker } from './callouts';
 import { tags as t } from '@lezer/highlight';
 import { isDragging, isDragEndTransaction } from './cm-drag-aware';
 import {
@@ -200,6 +201,27 @@ export function listItemHasTask(listMark: MdSyntaxNode): boolean {
     if (child.name === 'TaskMarker' || child.name === 'Task') return true;
   }
   return false;
+}
+
+/**
+ * Is the line at `pos` inside a `> [!type]` callout?
+ *
+ * Quote lines are padded 16px (`.cm-md-quote-line`), list lines cancel that
+ * padding so their marker hangs at the card's edge. Once a list item is
+ * indented to four spaces Markdown stops seeing a list, the list decoration
+ * disappears and the `>` appears to jump 16px right mid-Tab. Callout list
+ * lines therefore keep the quote padding: the source view of a callout stays
+ * on one left edge whatever the indent, and the marker never shifts.
+ */
+function isCalloutLine(state: EditorState, pos: number): boolean {
+  let line = state.doc.lineAt(Math.min(pos, state.doc.length));
+  while (line.number > 1) {
+    const prev = state.doc.line(line.number - 1);
+    if (!/^[ \t]*>/.test(prev.text)) break;
+    line = prev;
+  }
+  const header = /^[ \t]*>\s?(.*)$/.exec(line.text);
+  return !!(header && parseCalloutMarker(header[1]));
 }
 
 // ---------------------------------------------------------------------------
@@ -616,11 +638,18 @@ function buildDecorations(view: EditorView, showMarkers = false): DecorationSet 
                 : Math.min(6, markLen * 0.65 + 0.55);
             const indentEm = Math.min(8, leadSpaces * 0.55 + markEm);
             const indentStr = `${indentEm.toFixed(2)}em`;
+            // Inside a callout, hang the list on the quote card's 16px text
+            // edge instead of its outer edge. Otherwise reaching four spaces
+            // (Markdown: indented code block) drops the list decoration and
+            // the `>` visibly jumps 16px right in the middle of a Tab run.
+            const padLeft = isCalloutLine(view.state, lineObj.from)
+              ? `calc(${indentStr} + 16px)`
+              : indentStr;
             ranges.push(
               Decoration.line({
                 class: 'cm-md-list-line',
                 attributes: {
-                  style: `padding-left: ${indentStr}; text-indent: -${indentStr};`,
+                  style: `padding-left: ${padLeft}; text-indent: -${indentStr};`,
                 },
               }).range(lineObj.from),
             );

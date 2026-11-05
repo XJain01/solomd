@@ -154,3 +154,17 @@ export function toggleTaskLine(content: string, line1Based: number): string | nu
   lines[idx] = `${m[1]}${m[2] === ' ' ? 'x' : ' '}${m[3]}`;
   return lines.join('\n');
 }
+
+/**
+ * The `[ ]` / `[x]` marker of one source line, or null.
+ *
+ * Unlike `toggleTaskLine`, this accepts blockquote prefixes, because a task
+ * inside a callout is `> - [ ] item` at the document level. `index` is the
+ * offset of the character between the brackets, so a caller can flip exactly
+ * that character and leave the rest of the line alone.
+ */
+export function taskMarkerInLine(line: string): { index: number; checked: boolean } | null {
+  const m = /^(?:\s{0,3}>\s?)*\s*[-*+]\s+\[([ xX])\]/.exec(line);
+  if (!m) return null;
+  return { index: m[0].length - 2, checked: m[1] !== ' ' };
+}

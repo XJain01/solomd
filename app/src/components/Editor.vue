@@ -6,8 +6,9 @@ import { defaultKeymap, history, historyKeymap, indentWithTab, undo as cmUndo, r
 import { searchKeymap, search, openSearchPanel, closeSearchPanel, getSearchQuery, setSearchQuery } from '@codemirror/search';
 import { createFindPanel, type FindPanelLabels } from '../lib/cm-find-panel';
 import { tabCaretMemory, tabTopLineMemory, type TabCaretSnapshot } from '../lib/scroll-memory';
-import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching } from '@codemirror/language';
+import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, getIndentUnit } from '@codemirror/language';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
+import { calloutIndentEdit } from '../lib/callout-indent';
 import { cjkFriendlyEmphasis } from '../lib/cm-cjk-emphasis';
 import { bindMermaidInteractions, initMermaid } from '../lib/mermaid-lazy';
 import { parseInsertSnippet } from '../lib/insert-snippet';
@@ -4200,6 +4201,36 @@ function listIndentCommand(v: EditorView, outdent: boolean): boolean {
 }
 
 /**
+ * Tab inside a callout indents the content after `>`, never the marker
+ * (lib/callout-indent). Every other line — including a plain blockquote —
+ * falls through to the list indent above and then `indentWithTab`, so this
+ * cannot change how the rest of the document indents.
+ */
+function calloutIndentCommand(v: EditorView, outdent: boolean): boolean {
+  if (props.tab.language !== 'markdown' || v.state.readOnly) return false;
+  if (v.state.selection.ranges.length > 1) return false;
+  const sel = v.state.selection.main;
+  if (!sel.empty) return false;
+  const edit = calloutIndentEdit(
+    v.state.doc.toString(),
+    sel.head,
+    outdent,
+    getIndentUnit(v.state),
+  );
+  if (!edit) return false;
+  // Header line: consume the key, but changing it would either stop the
+  // callout being one or move the `>` this command exists to keep in place.
+  if (!edit.changed) return true;
+  v.dispatch({
+    changes: { from: edit.from, to: edit.to, insert: edit.insert },
+    selection: { anchor: edit.sel },
+    scrollIntoView: true,
+    userEvent: 'input.indent',
+  });
+  return true;
+}
+
+/**
  * Ordered-list numbers follow a line added or removed by the user — the
  * textarea editors apply the same rule at their commit points
  * (lib/list-renumber). Appended to the same transaction, so one undo step
@@ -4409,6 +4440,8 @@ function buildExtensions() {
       // ⌘⇧Z the Mac's); people type Ctrl+Shift+Z there too, and the plain
       // editor already takes both.
       { win: 'Ctrl-Shift-z', run: cmRedo, preventDefault: true },
+      { key: 'Tab', run: (v) => calloutIndentCommand(v, false) },
+      { key: 'Shift-Tab', run: (v) => calloutIndentCommand(v, true) },
       { key: 'Tab', run: (v) => listIndentCommand(v, false) },
       { key: 'Shift-Tab', run: (v) => listIndentCommand(v, true) },
       indentWithTab,
