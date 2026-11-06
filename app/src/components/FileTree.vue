@@ -1128,12 +1128,40 @@ function rowElementFor(path: string): HTMLElement | null {
 /** Highlight a row that is already on screen and scroll it into view. */
 function flashRow(path: string, row: HTMLElement) {
   revealedPath.value = path;
-  row.scrollIntoView({ block: 'center' });
+  scrollRowIntoView(row, true);
   if (revealTimer) clearTimeout(revealTimer);
   revealTimer = setTimeout(() => {
     revealTimer = null;
     clearRevealedPath();
   }, REVEAL_HOLD_MS);
+}
+
+/**
+ * Scroll a row into the tree viewport vertically, leaving `scrollLeft` alone.
+ *
+ * #495 lets long node names scroll horizontally instead of truncating, but
+ * the browser's `scrollIntoView` also scrolled sideways to reveal the end of
+ * a wide row. Following the active note then left the tree shifted with its
+ * icons and indentation cut off — the "eaten" left edge. Horizontal position
+ * belongs to the user.
+ */
+function scrollRowIntoView(row: HTMLElement, center: boolean): void {
+  const body = treeBody.value;
+  if (!body) {
+    row.scrollIntoView({ block: center ? 'center' : 'nearest', inline: 'nearest' });
+    return;
+  }
+  const bodyRect = body.getBoundingClientRect();
+  const rowRect = row.getBoundingClientRect();
+  if (center) {
+    body.scrollTop +=
+      rowRect.top - bodyRect.top - (bodyRect.height - rowRect.height) / 2;
+    return;
+  }
+  if (rowRect.top < bodyRect.top) body.scrollTop -= bodyRect.top - rowRect.top;
+  else if (rowRect.bottom > bodyRect.bottom) {
+    body.scrollTop += rowRect.bottom - bodyRect.bottom;
+  }
 }
 
 /** Expand every folder on the way down, then flash the row. False when the
@@ -1146,7 +1174,7 @@ async function revealRow(path: string, quiet = false): Promise<boolean> {
   // The row's own path, not the request's: on Windows the two may differ in
   // spelling, and the highlight compares against the tree's.
   const show = (row: HTMLElement) =>
-    quiet ? row.scrollIntoView({ block: 'nearest' }) : flashRow(row.dataset.path ?? path, row);
+    quiet ? scrollRowIntoView(row, false) : flashRow(row.dataset.path ?? path, row);
   // Already rendered — its ancestors are expanded. Checked first because it
   // also covers SAF vaults, whose node paths are opaque `saf:<docId>` values
   // that cannot be walked by prefix.
