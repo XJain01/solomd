@@ -566,7 +566,11 @@ onBeforeUnmount(() => {
 
     <!-- Task detail drawer with a modal scrim; closing saves. -->
     <Teleport to="body">
-      <div v-if="detailId" class="kanban__detail-backdrop" @click.self="closeDetail">
+      <!-- Close on press *on the scrim itself*, not on the click. A click's
+           target is the common ancestor of press and release, so dragging a
+           text selection out of the drawer ended on the scrim and closed it
+           as if the scrim had been clicked. -->
+      <div v-if="detailId" class="kanban__detail-backdrop" @pointerdown.self="closeDetail">
         <aside class="kanban__detail" role="dialog" aria-modal="true" @pointerdown.stop>
         <header class="kanban__detail-head">
             <h2 class="kanban__detail-title">{{ t('kanban.taskDetails') }}</h2>
