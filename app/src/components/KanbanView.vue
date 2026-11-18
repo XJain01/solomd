@@ -5,7 +5,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Icons from './Icons.vue';
-import { DsSelect, type DsSelectOption } from '../ui';
+import { DsButton, DsInput, DsModal, DsSelect, type DsSelectOption } from '../ui';
 import '../styles/panels.css';
 import { useI18n } from '../i18n';
 import { useKanbanStore } from '../stores/kanban';
@@ -414,23 +414,35 @@ onBeforeUnmount(() => {
 
     <p v-if="board.lastError" class="kanban__error">{{ board.lastError }}</p>
 
-    <form v-if="creatingProject" class="kanban__create" @submit.prevent="commitProject">
-      <input
-        v-model="projectDraft"
-        class="kanban__input"
-        type="text"
-        :placeholder="t('kanban.projectName')"
-        autofocus
-      />
-      <button class="rp-btn" type="submit">{{ t('kanban.save') }}</button>
-      <button class="rp-btn" type="button" @click="creatingProject = false">{{ t('kanban.cancel') }}</button>
-    </form>
+    <!-- New project lives in a modal: an inline row pushed the whole board down
+         and re-flowed the columns every time it opened. -->
+    <DsModal
+      :model-value="creatingProject"
+      :title="t('kanban.newProject')"
+      width="400px"
+      @update:model-value="creatingProject = $event"
+    >
+      <label class="kanban__field">
+        <span>{{ t('kanban.projectName') }}</span>
+        <DsInput
+          v-model="projectDraft"
+          :placeholder="t('kanban.projectName')"
+          @keydown.enter.prevent="commitProject"
+        />
+      </label>
+      <template #footer>
+        <DsButton variant="secondary" @click="creatingProject = false">{{ t('kanban.cancel') }}</DsButton>
+        <DsButton variant="primary" :disabled="!projectDraft.trim()" @click="commitProject">
+          {{ t('kanban.save') }}
+        </DsButton>
+      </template>
+    </DsModal>
 
     <div v-if="board.loading" class="kanban__empty">
       <p class="kanban__empty-body">{{ t('kanban.loading') }}</p>
     </div>
 
-    <div v-else-if="!project && !creatingProject" class="kanban__empty">
+    <div v-else-if="!project" class="kanban__empty">
       <p class="kanban__empty-title">{{ t('kanban.emptyTitle') }}</p>
       <p class="kanban__empty-body">{{ t('kanban.emptyBody') }}</p>
       <button class="rp-btn" type="button" @click="startProject">{{ t('kanban.newProject') }}</button>
@@ -691,12 +703,6 @@ onBeforeUnmount(() => {
 .kanban__project-picker {
   display: inline-flex;
   width: 200px;
-}
-.kanban__create {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px 0;
 }
 .kanban__empty {
   flex: 1;
