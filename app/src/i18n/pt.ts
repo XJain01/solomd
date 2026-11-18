@@ -823,7 +823,6 @@ export const pt: I18n = {
     copiedSelectionAsImage: "Seleção copiada como imagem",
     clipboardSavedPng: "Falha na área de transferência — salvo como PNG",
     copyImageFailed: "Falha ao copiar imagem: {error}",
-    openedFile: "{name} aberto",
     openFailed: "Falha ao abrir: {error}",
     convertingFile: "Convertendo {name} para Markdown…",
     convertedFile: "{name} convertido → Markdown",

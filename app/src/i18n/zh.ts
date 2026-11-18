@@ -822,7 +822,6 @@ export const zh: I18n = {
     copiedSelectionAsImage: "已将选中内容复制为图片",
     clipboardSavedPng: "写入剪贴板失败 — 已改为保存为 PNG",
     copyImageFailed: "复制图片失败：{error}",
-    openedFile: "已打开 {name}",
     openFailed: "打开失败：{error}",
     convertingFile: "正在将 {name} 转换为 Markdown…",
     convertedFile: "已转换 {name} → Markdown",

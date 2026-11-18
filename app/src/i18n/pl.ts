@@ -821,7 +821,6 @@ export const pl: I18n = {
     copiedSelectionAsImage: "Skopiowano zaznaczenie jako obraz",
     clipboardSavedPng: "Schowek zawiódł — zapisano jako PNG",
     copyImageFailed: "Kopiowanie obrazu nie powiodło się: {error}",
-    openedFile: "Otwarto {name}",
     openFailed: "Nie udało się otworzyć: {error}",
     convertingFile: "Konwertowanie {name} na Markdown…",
     convertedFile: "Skonwertowano {name} → Markdown",

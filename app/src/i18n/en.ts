@@ -827,7 +827,6 @@ export const en = {
     copiedSelectionAsImage: "Copied selection as image",
     clipboardSavedPng: "Clipboard failed — saved as PNG instead",
     copyImageFailed: "Copy image failed: {error}",
-    openedFile: "Opened {name}",
     openFailed: "Failed to open: {error}",
     convertingFile: "Converting {name} to Markdown…",
     convertedFile: "Converted {name} → Markdown",

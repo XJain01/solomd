@@ -821,7 +821,6 @@ export const nl: I18n = {
     copiedSelectionAsImage: "Selectie gekopieerd als afbeelding",
     clipboardSavedPng: "Klembord mislukt — in plaats daarvan opgeslagen als PNG",
     copyImageFailed: "Afbeelding kopiëren mislukt: {error}",
-    openedFile: "{name} geopend",
     openFailed: "Openen mislukt: {error}",
     convertingFile: "{name} omzetten naar Markdown…",
     convertedFile: "{name} omgezet → Markdown",

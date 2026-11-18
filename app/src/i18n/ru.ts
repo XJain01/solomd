@@ -819,7 +819,6 @@ export const ru: I18n = {
     copiedSelectionAsImage: "Выделение скопировано как изображение",
     clipboardSavedPng: "Буфер обмена недоступен — сохранено как PNG",
     copyImageFailed: "Не удалось скопировать изображение: {error}",
-    openedFile: "Открыт {name}",
     openFailed: "Не удалось открыть: {error}",
     convertingFile: "Преобразование {name} в Markdown…",
     convertedFile: "{name} преобразован → Markdown",

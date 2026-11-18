@@ -821,7 +821,6 @@ export const de: I18n = {
     copiedSelectionAsImage: "Auswahl als Bild kopiert",
     clipboardSavedPng: "Zwischenablage fehlgeschlagen — stattdessen als PNG gespeichert",
     copyImageFailed: "Bild kopieren fehlgeschlagen: {error}",
-    openedFile: "{name} geöffnet",
     openFailed: "Öffnen fehlgeschlagen: {error}",
     convertingFile: "{name} wird in Markdown umgewandelt…",
     convertedFile: "{name} → Markdown umgewandelt",

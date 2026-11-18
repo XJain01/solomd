@@ -821,7 +821,6 @@ export const uk: I18n = {
     copiedSelectionAsImage: "Виділення скопійовано як зображення",
     clipboardSavedPng: "Буфер обміну недоступний — збережено як PNG",
     copyImageFailed: "Не вдалося скопіювати зображення: {error}",
-    openedFile: "Відкрито {name}",
     openFailed: "Не вдалося відкрити: {error}",
     convertingFile: "Перетворення {name} на Markdown…",
     convertedFile: "{name} перетворено → Markdown",

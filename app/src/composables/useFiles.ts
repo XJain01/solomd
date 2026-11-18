@@ -199,7 +199,6 @@ export function useFiles() {
       // 5.0 §8 — the phone shell moves to its editor screen on this (opening a
       // note that is already the active tab changes no store state).
       window.dispatchEvent(new CustomEvent('solomd:file-opened', { detail: { path } }));
-      toasts.success(t('toast.openedFile', { name: fileName }));
     } catch (e) {
       console.error('open image failed', e);
       toasts.error(t('toast.openFailed', { error: String(e) }));
@@ -400,8 +399,9 @@ export function useFiles() {
       // Keyed off viewport width (not the UA) so a narrow desktop window
       // behaves the same way the layout does.
       if (isNarrowViewport() && settings.showFileTree) settings.toggleFileTree();
-      const fileName = fileNameOf(path);
-      toasts.success(t('toast.openedFile', { name: fileName }));
+      // No "Opened <name>" toast: the tab strip, the tree selection and the
+      // editor content already show which file is open, and the toast covered
+      // the top-right of the document on every single open.
     } catch (e) {
       console.error('open failed', e);
       toasts.error(t('toast.openFailed', { error: String(e) }));

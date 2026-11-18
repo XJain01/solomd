@@ -821,7 +821,6 @@ export const it: I18n = {
     copiedSelectionAsImage: "Selezione copiata come immagine",
     clipboardSavedPng: "Appunti non disponibili — salvato come PNG",
     copyImageFailed: "Copia immagine non riuscita: {error}",
-    openedFile: "Aperto {name}",
     openFailed: "Apertura non riuscita: {error}",
     convertingFile: "Conversione di {name} in Markdown…",
     convertedFile: "Convertito {name} → Markdown",

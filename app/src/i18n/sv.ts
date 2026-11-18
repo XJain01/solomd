@@ -821,7 +821,6 @@ export const sv: I18n = {
     copiedSelectionAsImage: "Markeringen kopierad som bild",
     clipboardSavedPng: "Urklipp misslyckades — sparad som PNG i stället",
     copyImageFailed: "Kopiering av bild misslyckades: {error}",
-    openedFile: "Öppnade {name}",
     openFailed: "Kunde inte öppna: {error}",
     convertingFile: "Konverterar {name} till Markdown…",
     convertedFile: "Konverterade {name} → Markdown",

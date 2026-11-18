@@ -821,7 +821,6 @@ export const tr: I18n = {
     copiedSelectionAsImage: "Seçim görsel olarak kopyalandı",
     clipboardSavedPng: "Pano kullanılamadı — bunun yerine PNG olarak kaydedildi",
     copyImageFailed: "Görsel kopyalanamadı: {error}",
-    openedFile: "{name} açıldı",
     openFailed: "Açılamadı: {error}",
     convertingFile: "{name} Markdown'a dönüştürülüyor…",
     convertedFile: "{name} dönüştürüldü → Markdown",

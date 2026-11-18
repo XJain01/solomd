@@ -821,7 +821,6 @@ export const es: I18n = {
     copiedSelectionAsImage: "Selección copiada como imagen",
     clipboardSavedPng: "Falló el portapapeles — se guardó como PNG",
     copyImageFailed: "Error al copiar la imagen: {error}",
-    openedFile: "Abierto {name}",
     openFailed: "Error al abrir: {error}",
     convertingFile: "Convirtiendo {name} a Markdown…",
     convertedFile: "Convertido {name} → Markdown",

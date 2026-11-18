@@ -821,7 +821,6 @@ export const ko: I18n = {
     copiedSelectionAsImage: "선택 영역을 이미지로 복사됨",
     clipboardSavedPng: "클립보드 복사 실패 — 대신 PNG로 저장했습니다",
     copyImageFailed: "이미지 복사 실패: {error}",
-    openedFile: "{name} 열림",
     openFailed: "열기 실패: {error}",
     convertingFile: "{name}을(를) Markdown으로 변환 중…",
     convertedFile: "{name} → Markdown 변환 완료",

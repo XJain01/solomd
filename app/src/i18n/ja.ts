@@ -821,7 +821,6 @@ export const ja: I18n = {
     copiedSelectionAsImage: "選択範囲を画像としてコピーしました",
     clipboardSavedPng: "クリップボードへのコピーに失敗しました — 代わりに PNG として保存しました",
     copyImageFailed: "画像のコピーに失敗しました: {error}",
-    openedFile: "{name} を開きました",
     openFailed: "開けませんでした: {error}",
     convertingFile: "{name} を Markdown に変換中…",
     convertedFile: "{name} → Markdown に変換しました",
