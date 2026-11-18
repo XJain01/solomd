@@ -3,11 +3,13 @@ import { computed, h as hEdit, nextTick, onBeforeUnmount, onMounted, provide, re
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { revealInFileManager } from '../lib/reveal-in-file-manager';
+import { openPath } from '@tauri-apps/plugin-opener';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useFiles } from '../composables/useFiles';
 import { useInbox } from '../composables/useInbox';
 import { useInboxView } from '../composables/useInboxView';
 import { useSettingsStore } from '../stores/settings';
+import { useWorkspaceIndexStore } from '../stores/workspaceIndex';
 import { useToastsStore } from '../stores/toasts';
 import { useGithubSyncStore } from '../stores/githubSync';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
@@ -15,7 +17,9 @@ import { useTabsStore } from '../stores/tabs';
 import { useI18n } from '../i18n';
 import { isIOS, isMobile, revealLabelKey, usesCommandKey } from '../lib/platform';
 import { usePendingDeletes, isDeletePending, UNDO_WINDOW_MS } from '../composables/usePendingDeletes';
-import { isSafPath, fromSafPath, safList, safCreate, safCreateDir } from '../lib/saf-fs';
+import { isSafPath, fromSafPath, safList, safRead, safCreate, safCreateDir } from '../lib/saf-fs';
+import { renderMarkdown } from '../lib/markdown';
+import { resolveImageSrc, rewriteImageUrls } from '../lib/image-resolve';
 import {
   revealRequest,
   revealedPath,
@@ -69,6 +73,7 @@ const files = useFiles();
 const inbox = useInbox();
 const inboxView = useInboxView();
 const settings = useSettingsStore();
+const workspaceIndex = useWorkspaceIndexStore();
 const toasts = useToastsStore();
 const ghSync = useGithubSyncStore();
 
@@ -102,6 +107,22 @@ async function copyNodePath(node: Node) {
   await writeText(node.path);
   toasts.success(t('explorer.copyPathDone') || 'Path copied.');
   closeCtx();
+}
+
+function openNodeInNewWindow(node: Node) {
+  if (node.is_dir) return;
+  files.spawnAuxWindow(node.path);
+  closeCtx();
+}
+
+/** #214 / #140 / #152 — open non-Markdown or any file with the OS default application. */
+async function openNodeWithDefaultApp(node: Node) {
+  closeCtx();
+  try {
+    await openPath(node.path);
+  } catch (err) {
+    toasts.error(String(err));
+  }
 }
 
 /** #120 — copy the node's path relative to the workspace root, slash-normalised. */
@@ -431,7 +452,7 @@ async function toggle(node: Node, how: 'click' | 'dblclick' | 'caret' = 'click')
  *  — unlike toggle() it neither closes an open folder, moves the selection,
  *  nor waits for a double click. */
 async function expandDir(node: Node) {
-  if (node.expanded) return;
+  if (node.expanded && node.children) return;
   if (!node.children) {
     node.loading = true;
     const { children, truncated } = await loadDir(node.path);
@@ -442,29 +463,40 @@ async function expandDir(node: Node) {
   node.expanded = true;
 }
 
-/** #400 — Recursively expand or collapse all subfolders under a directory node. */
-async function expandSubtree(node: Node, maxDepth = 4) {
+/** #400 / #582 — Recursively expand or collapse all subfolders under a directory node. */
+async function expandSubtree(node: Node | null, maxDepth = 64) {
+  const target = node ?? root.value;
   closeCtx();
+  if (!target) return;
+  const visited = new Set<string>();
+  let expandedCount = 0;
   async function walk(n: Node, depth: number) {
-    if (!n.is_dir || depth > maxDepth) return;
+    if (!n.is_dir || depth > maxDepth || expandedCount >= 2000) return;
+    if (n.path) {
+      if (visited.has(n.path)) return;
+      visited.add(n.path);
+    }
+    expandedCount++;
     await expandDir(n);
     for (const child of n.children ?? []) {
       if (child.is_dir) await walk(child, depth + 1);
     }
   }
-  await walk(node, 0);
+  await walk(target, 0);
 }
 
-function collapseSubtree(node: Node) {
+function collapseSubtree(node: Node | null) {
+  const target = node ?? root.value;
   closeCtx();
-  function walk(n: Node) {
+  if (!target) return;
+  function walk(n: Node, isRootContainer: boolean) {
     if (!n.is_dir) return;
-    n.expanded = false;
+    if (!isRootContainer) n.expanded = false;
     for (const child of n.children ?? []) {
-      if (child.is_dir) walk(child);
+      if (child.is_dir) walk(child, false);
     }
   }
-  walk(node);
+  walk(target, target === root.value);
 }
 
 watch(
@@ -714,11 +746,20 @@ const editInput = ref<HTMLInputElement | null>(null);
 // It used to sit at the very top of the tree whatever the target, so a file
 // created inside a folder three levels down appeared to be going to the
 // root. Nodes are rendered by FileTreeNode (a render function), which draws
-// the row through this. The tree filters (inbox, extension) can hide the
-// target, and then the row falls back to the top, where it always was.
+// the row through this.
+//
+// #556 / #557 — this used to bail out to the top-of-tree box whenever ANY
+// tree filter was on (`showInboxOnly` / `extFilter`), even though the row the
+// user just right-clicked was still on screen: keeping an extension filter
+// turned on silently moved every rename box to the top of the sidebar, which
+// is exactly the "编辑框跑到导航树上部" report. The target is reachable by
+// definition (it was clicked), so only its presence and expansion matter
+// here; `editFallbackTop` below is the safety net for the rare case where the
+// filter really does hide the row.
+const editingFallbackTop = ref(false);
 const editInTree = computed(() => {
   const e = editing.value;
-  if (!e || showInboxOnly.value || extFilter.value.length) return false;
+  if (!e || editingFallbackTop.value) return false;
   if (e.kind === 'rename') return !!e.original && !!findNode(e.original);
   return e.parent === root.value?.path || !!findNode(e.parent)?.expanded;
 });
@@ -843,49 +884,62 @@ async function expandForCreate(parent: string) {
   if (node && node.is_dir && !node.expanded) await expandDir(node);
 }
 
+/**
+ * Focus the inline box once Vue has drawn it, selecting the basename
+ * (Finder-style) or the whole name.
+ *
+ * #556 / #557 — the box is normally drawn inside the tree, by the row it
+ * belongs to. If a tree filter (inbox / extension) hides that row, nothing is
+ * drawn there at all, so fall back to the top-of-tree box rather than leaving
+ * the user with no input. `focus({ preventScroll: true })` is not cosmetic: a
+ * plain focus() makes Chromium scroll the nearest horizontal scroller to
+ * reveal the caret, which slides the tree sideways.
+ */
+async function focusInlineEdit(select: 'basename' | 'all') {
+  await nextTick();
+  let el = editInput.value;
+  if (!el) {
+    editingFallbackTop.value = true;
+    await nextTick();
+    el = editInput.value;
+  }
+  if (!el) return;
+  el.focus({ preventScroll: true });
+  if (select === 'all') {
+    el.select();
+    return;
+  }
+  const dot = el.value.lastIndexOf('.');
+  el.setSelectionRange(0, dot > 0 ? dot : el.value.length);
+}
+
 async function startNewFile(parent: string) {
   closeCtx();
   await expandForCreate(parent);
+  editingFallbackTop.value = false;
   editing.value = { kind: 'new-file', parent, name: 'untitled.md' };
-  await nextTick();
-  // Select just the basename (not the .md) so a single keystroke replaces
-  // the placeholder, Finder-style.
-  const el = editInput.value;
-  if (el) {
-    el.focus();
-    const dot = el.value.lastIndexOf('.');
-    el.setSelectionRange(0, dot > 0 ? dot : el.value.length);
-  }
+  await focusInlineEdit('basename');
 }
 
 async function startNewFolder(parent: string) {
   closeCtx();
   await expandForCreate(parent);
+  editingFallbackTop.value = false;
   editing.value = { kind: 'new-dir', parent, name: 'New Folder' };
-  await nextTick();
-  const el = editInput.value;
-  if (el) {
-    el.focus();
-    el.select();
-  }
+  await focusInlineEdit('all');
 }
 
 async function startRename(node: Node) {
   closeCtx();
   const parent = node.path.replace(/[\\/][^\\/]+$/, '');
+  editingFallbackTop.value = false;
   editing.value = {
     kind: 'rename',
     parent,
     original: node.path,
     name: node.name,
   };
-  await nextTick();
-  const el = editInput.value;
-  if (el) {
-    el.focus();
-    const dot = el.value.lastIndexOf('.');
-    el.setSelectionRange(0, dot > 0 ? dot : el.value.length);
-  }
+  await focusInlineEdit('basename');
 }
 
 function joinPath(parent: string, name: string): string {
@@ -977,15 +1031,42 @@ function rootLabel(): string {
   return t('explorer.vaultRoot') || 'Vault root';
 }
 
+/** #571 — Reload clean open tabs whose inbound links were updated on disk. */
+async function refreshRewrittenTabs(updatedPaths: string[], skipTarget: string) {
+  if (!updatedPaths?.length) return;
+  const skipPrefixes = [skipTarget + '/', skipTarget + '\\'];
+  for (const p of updatedPaths) {
+    if (p === skipTarget || skipPrefixes.some((pre) => p.startsWith(pre))) continue;
+    const tab = (tabs.tabs as { id: string; filePath?: string; content?: string; savedContent?: string }[]).find(
+      (t) => t.filePath === p,
+    );
+    if (!tab || tab.savedContent !== tab.content) continue;
+    try {
+      const fr = await invoke<{ content: string }>('read_file', { path: p });
+      tabs.setContent(tab.id, fr.content);
+      tabs.markSaved(tab.id, p);
+    } catch (err) {
+      console.warn('[FileTree] rewritten tab reload failed', err);
+    }
+  }
+  void workspaceIndex.rescan();
+}
+
 async function moveNode(from: string, destDir: string, isDir: boolean) {
   if (!canDropInto(from, destDir)) return;
   const name = baseName(from);
   const target = joinPath(destDir, name);
+  let updated: string[] = [];
   try {
     // A pending delete on the destination path would fire later and take the
     // moved file with it. Same race the new-file path guards against.
     await pendingDeletes.flushUnder(target);
-    await invoke('fs_move', { from, to: target });
+    updated = await invoke<string[]>('fs_move', {
+      from,
+      to: target,
+      workspaceRoot: workspace.currentFolder ?? undefined,
+      updateLinks: settings.autoUpdateLinksOnRename,
+    });
   } catch (err) {
     // By far the likeliest failure, and the raw Rust string is half English
     // and half absolute path — say it in the user's language instead.
@@ -998,6 +1079,7 @@ async function moveNode(from: string, destDir: string, isDir: boolean) {
     return;
   }
   repointTabs(from, target, isDir);
+  void refreshRewrittenTabs(updated, target);
   scheduleRefresh();
   toasts.push(
     t('explorer.moved', { name, dest: rootRelative(destDir) || rootLabel() }),
@@ -1013,8 +1095,14 @@ async function moveNode(from: string, destDir: string, isDir: boolean) {
 /** Undo is the same move run backwards, which also puts the rewritten
  *  relative links back the way they were. */
 async function undoMove(current: string, original: string, isDir: boolean, name: string) {
+  let updated: string[] = [];
   try {
-    await invoke('fs_move', { from: current, to: original });
+    updated = await invoke<string[]>('fs_move', {
+      from: current,
+      to: original,
+      workspaceRoot: workspace.currentFolder ?? undefined,
+      updateLinks: settings.autoUpdateLinksOnRename,
+    });
   } catch (err) {
     toasts.error(
       t('explorer.moveFailed', { name, error: String(err) }) ||
@@ -1023,6 +1111,7 @@ async function undoMove(current: string, original: string, isDir: boolean, name:
     return;
   }
   repointTabs(current, original, isDir);
+  void refreshRewrittenTabs(updated, original);
   scheduleRefresh();
   toasts.info(t('explorer.moveUndone', { name }));
 }
@@ -1582,7 +1671,12 @@ async function commitEdit() {
         return;
       }
       await pendingDeletes.flushUnder(target);
-      await invoke('fs_rename', { from: e.original, to: target });
+      const updated = await invoke<string[]>('fs_rename', {
+        from: e.original,
+        to: target,
+        workspaceRoot: workspace.currentFolder ?? undefined,
+        updateLinks: settings.autoUpdateLinksOnRename,
+      });
       editing.value = null;
       // #342 — a renamed child keeps its hand-placed position.
       const key = orderKey(e.parent);
@@ -1594,16 +1688,10 @@ async function commitEdit() {
         void saveManualOrder();
       }
       scheduleRefresh();
-      // v4.3.5 — if the renamed file is open in a tab, the tab follows it.
-      // repointTab is shared with the move path: it keeps a dirty tab's
-      // unsaved edits and reloads a clean one, which picks up any per-file
-      // `.assets/` link rewrite the rename triggered (#91).
-      try {
-        const tab = tabs.tabs.find((t: { filePath?: string }) => t.filePath === e.original);
-        if (tab) await repointTab(tab, target);
-      } catch (err) {
-        console.warn('[FileTree.rename] tab refresh failed', err);
-      }
+      // v4.3.5 + #571 — repoint open tabs (including notes inside a renamed
+      // folder) and reload clean workspace tabs whose inbound links changed.
+      repointTabs(e.original, target, true);
+      void refreshRewrittenTabs(updated, target);
     }
   } catch (err) {
     toasts.error(String(err));
@@ -1659,6 +1747,7 @@ function refocusTree(mode: 'fromEditor' | 'ifLost') {
 // the rename first), the keyboard is back in the tree rather than on <body>.
 let refocusAfterEdit = false;
 watch(editing, (e) => {
+  if (!e) editingFallbackTop.value = false;
   if (e || !refocusAfterEdit) return;
   refocusAfterEdit = false;
   refocusTree('ifLost');
@@ -1688,6 +1777,14 @@ function isDeleteChord(e: KeyboardEvent): boolean {
 
 function onTreeKey(e: KeyboardEvent) {
   if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
+  // #397 / #543 — When Quick Look is open, Space always closes it regardless of
+  // which element inside the modal or tree currently holds focus.
+  if (quickPreviewNode.value && e.key === ' ' && !e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeQuickPreview();
+    return;
+  }
   const target = e.target as HTMLElement | null;
   // The inline rename box, the filter popover's inputs… type normally there.
   if (target?.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return;
@@ -1706,6 +1803,17 @@ function onTreeKey(e: KeyboardEvent) {
     }
     return;
   }
+  // #397 — Space on a selected file opens Quick Look preview (like macOS Finder).
+  if (e.key === ' ' && !e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    const sel = selected.value;
+    const node = sel && !sel.isDir ? findNode(sel.path) : null;
+    if (node) {
+      e.preventDefault();
+      e.stopPropagation();
+      void openQuickPreview(node);
+    }
+    return;
+  }
   const isRename = e.key === 'F2' && !e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey;
   const isDelete = !isRename && isDeleteChord(e);
   if (!isRename && !isDelete) return;
@@ -1716,6 +1824,71 @@ function onTreeKey(e: KeyboardEvent) {
   e.stopPropagation();
   if (isRename) void startRename(node);
   else deleteNode(node);
+}
+
+// #397 — Quick Look modal preview for files in the FileTree.
+const quickPreviewNode = ref<{
+  path: string;
+  name: string;
+  kind: 'markdown' | 'text' | 'image';
+  html?: string;
+  text?: string;
+  imageSrc?: string;
+} | null>(null);
+
+async function openQuickPreview(node: Node) {
+  closeCtx();
+  if (node.is_dir) return;
+  const ext = (node.name.split('.').pop() || '').toLowerCase();
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) {
+    quickPreviewNode.value = {
+      path: node.path,
+      name: node.name,
+      kind: 'image',
+      imageSrc: resolveImageSrc(node.path, null, node.path),
+    };
+    return;
+  }
+  try {
+    const raw =
+      isSafPath(node.path) && workspace.safTreeUri
+        ? (await safRead(workspace.safTreeUri, fromSafPath(node.path))).content
+        : (await invoke<{ content: string }>('read_file', { path: node.path })).content;
+    if (['md', 'markdown', 'mdx'].includes(ext)) {
+      const rendered = renderMarkdown(raw.slice(0, 60000));
+      quickPreviewNode.value = {
+        path: node.path,
+        name: node.name,
+        kind: 'markdown',
+        html: rewriteImageUrls(rendered, null, node.path),
+      };
+    } else {
+      quickPreviewNode.value = {
+        path: node.path,
+        name: node.name,
+        kind: 'text',
+        text: raw.slice(0, 20000),
+      };
+    }
+  } catch (err) {
+    toasts.error(String(err));
+  }
+}
+
+function closeQuickPreview() {
+  if (!quickPreviewNode.value) return;
+  quickPreviewNode.value = null;
+  void nextTick(() => {
+    treeEl.value?.focus({ preventScroll: true });
+  });
+}
+
+async function openQuickPreviewInEditor() {
+  const item = quickPreviewNode.value;
+  quickPreviewNode.value = null;
+  if (!item) return;
+  await files.openPath(item.path, { fromTree: true });
+  focusEditor();
 }
 
 // CJK / IME guard for the rename / new-file inline input. Mirrors the pattern
@@ -1854,6 +2027,22 @@ function onWindowClick() {
   closeCtx();
 }
 function onWindowKey(e: KeyboardEvent) {
+  if (
+    !e.defaultPrevented &&
+    quickPreviewNode.value &&
+    e.key === ' ' &&
+    !e.altKey &&
+    !e.shiftKey &&
+    !e.ctrlKey &&
+    !e.metaKey &&
+    !e.isComposing &&
+    e.keyCode !== 229
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeQuickPreview();
+    return;
+  }
   if (e.key === 'Escape') {
     closeCtx();
     closeSwitcher();
@@ -1882,7 +2071,7 @@ onBeforeUnmount(() => {
     class="ftree"
     tabindex="-1"
     @keydown="onTreeKey"
-    :class="{ 'ftree--fullnames': settings.explorerFullNames, 'ftree--embedded': props.embedded }"
+    :class="{ 'ftree--fullnames': settings.explorerFullNames, 'ftree--embedded': props.embedded, 'ftree--editing': !!editing }"
     :style="props.embedded ? undefined : { '--file-tree-width': settings.fileTreeWidth + 'px' }"
     @contextmenu.prevent="openCtx($event, null)"
   >
@@ -1943,7 +2132,10 @@ onBeforeUnmount(() => {
             v-if="localVault"
             class="ftree__tool"
             type="button"
-            :class="{ 'ftree__tool--on': extFilter.length > 0, 'ftree__tool--open': filterOpen }"
+            :class="{
+              'ftree__tool--on': extFilter.length > 0 || settings.explorerShowHidden,
+              'ftree__tool--open': filterOpen,
+            }"
             :title="t('explorer.filterByType') || 'Filter by file type'"
             :aria-label="t('explorer.filterByType') || 'Filter by file type'"
             aria-haspopup="menu"
@@ -2077,6 +2269,17 @@ onBeforeUnmount(() => {
         <div v-if="extList.length === 0" class="ftree__menu-empty">
           {{ t('explorer.filterNoTypes') || 'Nothing to filter yet.' }}
         </div>
+        <div class="ftree__menu-sep"></div>
+        <button
+          class="ftree__menu-item"
+          :class="{ 'ftree__menu-item--active': settings.explorerShowHidden }"
+          role="menuitemcheckbox"
+          :aria-checked="settings.explorerShowHidden"
+          @click="settings.toggleExplorerShowHidden()"
+        >
+          <span class="ftree__menu-check">{{ settings.explorerShowHidden ? '✓' : '' }}</span>
+          <span class="ftree__menu-name">{{ t('settings.explorerShowHidden') }}</span>
+        </button>
       </div>
 
       <!-- The folder itself is gone (moved in Finder, deleted, drive
@@ -2202,7 +2405,7 @@ onBeforeUnmount(() => {
           {{ t('explorer.newFolder') || 'New Folder' }}
         </button>
       </template>
-      <template v-if="ctx.node && ctx.node.is_dir">
+      <template v-if="(!ctx.node && root) || (ctx.node && ctx.node.is_dir)">
         <div class="ftree__ctx-sep"></div>
         <button class="ftree__ctx-item" @click="expandSubtree(ctx.node)">
           {{ t('explorer.expandSubtree') || '展开全部子目录' }}
@@ -2214,6 +2417,22 @@ onBeforeUnmount(() => {
       <!-- Only between the "new file / folder" section (folders) and the rest:
            on a file the menu would otherwise open with an empty divider. -->
       <div v-if="ctx.node && ctx.node.is_dir" class="ftree__ctx-sep"></div>
+      <button
+        v-if="ctx.node && !ctx.node.is_dir"
+        class="ftree__ctx-item ftree__ctx-item--kbd"
+        aria-keyshortcuts="Space"
+        @click="openQuickPreview(ctx.node)"
+      >
+        <span>{{ settings.language?.startsWith('zh') ? '快速预览' : 'Quick Look' }}</span>
+        <kbd v-if="!isMobile()" class="ftree__ctx-kbd">Space</kbd>
+      </button>
+      <button
+        v-if="ctx.node && !ctx.node.is_dir"
+        class="ftree__ctx-item"
+        @click="workspace.addVirtualItem(ctx.node.path); closeCtx()"
+      >
+        {{ settings.language?.startsWith('zh') ? '加入虚拟工作空间' : 'Pin to Virtual Workspace' }}
+      </button>
       <button
         v-if="ctx.node"
         class="ftree__ctx-item ftree__ctx-item--kbd"
@@ -2254,6 +2473,12 @@ onBeforeUnmount(() => {
            on Android, and iOS has no Finder), so the item just looked broken. -->
       <template v-if="!isMobile()">
         <div class="ftree__ctx-sep"></div>
+        <button v-if="ctx.node && !ctx.node.is_dir" class="ftree__ctx-item" @click="openNodeInNewWindow(ctx.node)">
+          {{ t('tabMenu.openInNewWindow') }}
+        </button>
+        <button v-if="ctx.node && !ctx.node.is_dir" class="ftree__ctx-item" @click="openNodeWithDefaultApp(ctx.node)">
+          {{ settings.language === 'zh' ? '使用默认应用打开' : 'Open with Default App' }}
+        </button>
         <button class="ftree__ctx-item" @click="revealNode(ctx.node ?? root!)">
           {{ t(revealLabelKey('explorer.reveal')) }}
         </button>
@@ -2297,6 +2522,42 @@ onBeforeUnmount(() => {
       <template #footer>
         <DsButton variant="ghost" @click="deleteTarget = null">{{ t('explorer.cancel') }}</DsButton>
         <DsButton variant="danger" @click="confirmDelete">{{ t('explorer.delete') }}</DsButton>
+      </template>
+    </DsModal>
+
+    <!-- #397 — Quick Look modal preview (Space / context menu). -->
+    <DsModal
+      :model-value="!!quickPreviewNode"
+      :title="quickPreviewNode?.name ?? ''"
+      width="680px"
+      @update:model-value="closeQuickPreview"
+    >
+      <div v-if="quickPreviewNode" class="ftree__quicklook">
+        <div
+          v-if="quickPreviewNode.kind === 'image'"
+          class="ftree__quicklook-img-wrap"
+        >
+          <img
+            :src="quickPreviewNode.imageSrc"
+            :alt="quickPreviewNode.name"
+            class="ftree__quicklook-img"
+            referrerpolicy="no-referrer"
+          />
+        </div>
+        <div
+          v-else-if="quickPreviewNode.kind === 'markdown'"
+          class="ftree__quicklook-md preview-content"
+          v-html="quickPreviewNode.html"
+        ></div>
+        <pre v-else class="ftree__quicklook-text">{{ quickPreviewNode.text }}</pre>
+      </div>
+      <template #footer>
+        <DsButton variant="ghost" @click="closeQuickPreview">
+          {{ settings.language?.startsWith('zh') ? '关闭' : 'Close' }}
+        </DsButton>
+        <DsButton variant="primary" @click="openQuickPreviewInEditor">
+          {{ settings.language?.startsWith('zh') ? '在编辑器中打开' : 'Open in Editor' }}
+        </DsButton>
       </template>
     </DsModal>
 
@@ -2960,8 +3221,10 @@ export const FileTreeNode = defineComponent({
   overflow-y: auto;
   overflow-x: auto;
   padding-bottom: var(--sp-2);
-  scrollbar-width: thin;
-  scrollbar-color: var(--fill-2) transparent;
+  /* Do NOT set scrollbar-width / scrollbar-color here: in Chromium >= 121
+     (WebView2) either one disables every ::-webkit-scrollbar rule from
+     styles/scrollbars.css, so the horizontal bar falls back to an invisible
+     overlay scrollbar. The app-wide thin bars apply by default instead. */
 }
 
 /* #282 — a persisted filter must never be invisible. */
@@ -3257,6 +3520,23 @@ export const FileTreeNode = defineComponent({
   padding: 0 8px 0 6px;
   position: relative;
 }
+/* Narrow sidebar + inline rename: #495 lets the tree grow wider than the
+   panel (width: max-content). Once the tree has been scrolled sideways, the
+   row being renamed would otherwise start off-screen and lose its indent, so
+   pin it to the scrollport's left edge while an edit is active. `left: 0`
+   keeps the row's own paddingLeft (the depth indent) visible. */
+.ftree--editing :deep(.ftree__edit) {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--bg-sidebar, var(--bg));
+}
+/* The input must never contribute its intrinsic width to the max-content
+   calculation of .ftree__list — that is what used to widen the whole tree on
+   rename and make the horizontal scroll jump. */
+.ftree--editing :deep(.ftree__edit-input) {
+  width: 0;
+}
 .ftree__body > .ftree__edit {
   margin: 0 var(--sp-2);
 }
@@ -3394,5 +3674,40 @@ html.solomd-tree-drag-invalid * {
     flex-shrink: 0;
   }
   .ftree__more:active { background: var(--fill-1); }
+}
+
+.ftree__quicklook {
+  max-height: 62vh;
+  overflow-y: auto;
+  padding: 4px 2px;
+}
+.ftree__quicklook-img-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px;
+}
+.ftree__quicklook-img {
+  max-width: 100%;
+  max-height: 55vh;
+  border-radius: 6px;
+  object-fit: contain;
+}
+.ftree__quicklook-md {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text);
+}
+.ftree__quicklook-text {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
 }
 </style>

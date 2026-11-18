@@ -4721,8 +4721,9 @@ dependencies = [
 
 [[package]]
 name = "solomd"
-version = "5.1.2"
+version = "5.2.2"
 dependencies = [
+ "arboard",
  "argon2",
  "async-stream",
  "base64 0.22.1",

@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue';
-import { EditorState, Compartment, Prec } from '@codemirror/state';
+import { ref, shallowRef, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue';
+import { EditorState, Compartment, Prec, Transaction } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, rectangularSelection, crosshairCursor } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentWithTab, undo as cmUndo, redo as cmRedo } from '@codemirror/commands';
-import { searchKeymap, search, openSearchPanel, closeSearchPanel, getSearchQuery, setSearchQuery } from '@codemirror/search';
-import { createFindPanel, type FindPanelLabels } from '../lib/cm-find-panel';
+import { defaultKeymap, history, historyKeymap, indentWithTab, undo as cmUndo, redo as cmRedo, addCursorAbove, addCursorBelow } from '@codemirror/commands';
+import { searchKeymap, search, openSearchPanel, closeSearchPanel, getSearchQuery, setSearchQuery, selectNextOccurrence } from '@codemirror/search';
+import { createFindPanel, setFindPanelReplaceExpanded, selectAllOccurrencesCommand, type FindPanelLabels } from '../lib/cm-find-panel';
 import { tabCaretMemory, tabTopLineMemory, type TabCaretSnapshot } from '../lib/scroll-memory';
-import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, getIndentUnit } from '@codemirror/language';
+import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, getIndentUnit, indentUnit } from '@codemirror/language';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { calloutIndentEdit } from '../lib/callout-indent';
 import { cjkFriendlyEmphasis } from '../lib/cm-cjk-emphasis';
-import { bindMermaidInteractions, initMermaid } from '../lib/mermaid-lazy';
+import { bindMermaidInteractions, renderMermaidCached } from '../lib/mermaid-lazy';
 import { parseInsertSnippet } from '../lib/insert-snippet';
 // The grammar imports and the `codeLanguages` list they feed now live in
 // `lib/code-languages.ts`: the ``` fence-language picker (#297) derives its
@@ -18,7 +18,7 @@ import { parseInsertSnippet } from '../lib/insert-snippet';
 import { codeLanguages } from '../lib/code-languages';
 import { fenceLanguageComplete, fenceLanguageExtension } from '../lib/cm-fence-completion';
 import { filterFenceLanguages, isInsideFenceBefore, matchFenceOpener } from '../lib/fence-languages';
-import { vim, Vim } from '@replit/codemirror-vim';
+import { vim, Vim, getCM } from '@replit/codemirror-vim';
 import { cmThemeFor, mermaidThemeFor, activeLineExtension } from '../lib/themes';
 import { registerPlainSelectionGetter } from '../lib/plain-selection';
 import {
@@ -28,7 +28,7 @@ import {
   unfoldAllFolds,
   foldHeadingsToLevel,
 } from '../lib/cm-heading-fold';
-import { findTableSpan } from '../lib/markdown-table';
+import { findTableSpan, parseTable, serializeTable } from '../lib/markdown-table';
 import { findMathSpanAt, collectLabels } from '../lib/equations';
 import { openFormulaEditor } from '../lib/formula-editor-bus';
 import { openTableEditor } from '../lib/table-editor-bus';
@@ -52,10 +52,11 @@ import {
   shiftHeading,
   type EditorCommand,
 } from '../lib/editor-commands';
+import { CursorHistoryQueue } from '../lib/cursor-history';
 import { caretRowInfo, caretTopPx, caretPointPx, lastVisualRowStart, firstVisualRowEnd, measureLineHeights, offsetAtPoint, selectionBoxPx } from '../lib/textarea-metrics';
 import { activeParagraphLines, lineAt } from '../lib/focus-paragraph';
 import { transformCase, nextCaseInCycle, caseTargetRange, type CaseMode } from '../lib/text-case';
-import { applyFormat, FORMAT_KINDS, listIndentEdit, type FormatKind } from '../lib/md-format';
+import { applyFormat, applyHighlightColor, FORMAT_KINDS, listIndentEdit, type FormatKind } from '../lib/md-format';
 import { useFormatHints } from '../composables/useFormatHints';
 import { useTabsStore } from '../stores/tabs';
 import { useSettingsStore, buildEditorFontStack } from '../stores/settings';
@@ -63,11 +64,28 @@ import { useToastsStore } from '../stores/toasts';
 import type { Tab } from '../types';
 import { livePreviewExtension, richHighlightOnly } from '../lib/cm-live-preview';
 import { liveEditExtension, setLiveEditCopyLabel } from '../lib/cm-live-render';
-import { liveBlocksExtension, liveBlocksTheme, extractImageRoot, findTableCellOffsetInLine } from '../lib/cm-live-blocks';
+import { pdfPageBreaksExtension } from '../lib/pdf-page-breaks';
+import {
+  liveBlocksExtension,
+  liveBlocksTheme,
+  extractImageRoot,
+  findTableCellOffsetInLine,
+  bindDomTableCellEditor,
+  getActiveTableCellSession,
+  requestTableCellFocus,
+  resetBlockFoldOverridesEffect,
+  type DomTableEditorHandle,
+} from '../lib/cm-live-blocks';
+import { HEADER_ROW, commonIndent } from '../lib/table-cell-edit';
 import { findTldrawFences, replaceBoardSnapshot } from '../lib/tldraw-board';
 import { dragAwareExtension } from '../lib/cm-drag-aware';
-import { imagePasteExtension, insertImageFromPath as cmInsertImageFromPath, imageTextFromPath, handleTextareaImagePaste, type ImagePasteOptions } from '../lib/cm-image-paste';
-import { markdownImage, encodeImageDestination, resizeMarkdownImageLine } from '../lib/md-image-url';
+import { imagePasteExtension, insertImageFromPath as cmInsertImageFromPath, imageTextFromPath, handleTextareaImagePaste, getPlainTextFromClipboardData, readClipboardTextFallback, type ImagePasteOptions } from '../lib/cm-image-paste';
+import {
+  markdownImage,
+  encodeImageDestination,
+  resizeMarkdownImageLine,
+  isStandaloneImageLine,
+} from '../lib/md-image-url';
 import { resolveUploader, uploadImage, type ImageUploadSettings } from '../lib/image-upload';
 import { focusModeExtension, typewriterModeExtension } from '../lib/cm-focus-mode';
 import { wikilinkExtension, wikilinkComplete } from '../lib/cm-wikilink';
@@ -75,6 +93,8 @@ import { tagAutocompleteExtension, tagComplete } from '../lib/cm-tag-autocomplet
 import { citationsExtension, citationCompleteSource } from '../lib/cm-citations';
 import { autocompletion } from '@codemirror/autocomplete';
 import { aiRewriteExtension } from '../lib/cm-ai-rewrite';
+import { applyVimrcMappings } from '../lib/vimrc';
+import { invoke } from '@tauri-apps/api/core';
 import { cmKeyOwnedByApp, combosFor, toCodeMirrorKey, eventToCombo, resolveBindings } from '../lib/keybindings';
 import {
   docParagraphStarts,
@@ -93,30 +113,39 @@ import { languagetoolCoversSpelling, ltAddWord, ltDisableRule, ltIgnore, matchWo
 import { usePandocExport } from '../composables/usePandocExport';
 import type { CitationEntry } from '../lib/citations';
 import { taskListExtension } from '../lib/cm-task-list';
-import { imeCompositionGuard } from '../lib/cm-ime-guard';
+import { imeCompositionGuard, isImeComposingActive } from '../lib/cm-ime-guard';
 import {
   sessionRestoreExtension,
   readSession,
   clearSession,
 } from '../lib/cm-session-restore';
 import { renderMarkdown, extractImageRoot as extractMarkdownImageRoot } from '../lib/markdown';
+import { splitPlainMarkdownBlocks } from '../lib/plain-blocks';
 import { useRenderDepsVersion } from '../composables/useRenderDepsVersion';
 import { attachCodeCopyButtons } from '../lib/code-copy';
 import { plantumlSvgUrl } from '../lib/plantuml';
 import { stableClickSelection } from '../lib/cm-stable-click';
+import { focusCodeMirrorWithoutScroll, preservePointerFocusScroll } from '../lib/cm-preserve-focus';
 import { cjkDoubleClickSelection } from '../lib/cm-cjk-dblclick';
 import { installSvgImageFallbacks, rewriteImageUrls } from '../lib/image-resolve';
 import { SLASH_BLOCKS, filterBlocks, expandSnippet, indentExpandedSnippet } from '../lib/slash-blocks';
 import { useWorkspaceIndexStore } from '../stores/workspaceIndex';
 import { isWindowsEditorRuntime, shouldUsePlainWindowsEditor } from '../lib/platform';
-import { isAndroid, isIOS, isMobile } from '../lib/platform';
+import { isAndroid, isIOS, isMobile, usesCommandKey } from '../lib/platform';
 import SelectionBubble, { type BubbleSelection } from './SelectionBubble.vue';
+import TableToolbar from './TableToolbar.vue';
+import { applyTableAction, cellStart, colAfterAction, rowAfterAction, tableAt, type TableAction, type TableToolbarState } from '../lib/table-toolbar';
 import { lineContext, nextHeadingKind, type Box } from '../lib/selection-bubble';
 import EditorContextMenu, { type EditorMenuAction, type EditorMenuSpell } from './EditorContextMenu.vue';
 import { lookupMisspelling, addToSpellDict } from '../lib/spell-suggest';
 import { copyImageElement } from '../lib/image-clipboard';
-import { readText as readClipboardTextPlugin, writeText as writeClipboardTextPlugin } from '@tauri-apps/plugin-clipboard-manager';
-import { computeListContinuation, computeListSoftBreak, repairIndentedFenceEdit } from '../lib/list-continuation';
+import { writeText as writeClipboardTextPlugin } from '@tauri-apps/plugin-clipboard-manager';
+import {
+  computeListContinuation,
+  computeListSoftBreak,
+  isLazyListContinuationLine,
+  repairIndentedFenceEdit,
+} from '../lib/list-continuation';
 import { mapPos, renumberAfterEdit, renumberChanges } from '../lib/list-renumber';
 import { findMarkdownLinkAt, openMarkdownHref, openRenderedLink } from '../lib/link-open';
 
@@ -159,6 +188,15 @@ type PlainBlock = {
   text: string;
   hasTrailingNewline: boolean;
   html: string;
+  isTable?: boolean;
+  isTableBlock?: boolean;
+  isMermaid?: boolean;
+  /** #561 — a standalone image line: source stays visible next to the picture. */
+  isImageBlock?: boolean;
+  sourceCollapsed?: boolean;
+  headingLevel?: number;
+  startLine: number;
+  lineCount: number;
 };
 
 const props = withDefaults(
@@ -218,6 +256,15 @@ watch(
 
 const host = ref<HTMLDivElement | null>(null);
 let view: EditorView | null = null;
+const cursorHistoryByTab = new Map<string, CursorHistoryQueue>();
+function getCursorHistory(tabId = props.tab.id): CursorHistoryQueue {
+  let q = cursorHistoryByTab.get(tabId);
+  if (!q) {
+    q = new CursorHistoryQueue(10);
+    cursorHistoryByTab.set(tabId, q);
+  }
+  return q;
+}
 let cleanupRelayout: (() => void) | null = null;
 let cleanupTransformCase: (() => void) | null = null;
 let cleanupPlainSelection: (() => void) | null = null;
@@ -238,6 +285,12 @@ const aiKeyCompartment = new Compartment();
 const baseKeymapCompartment = new Compartment();
 function baseKeymap() {
   const overrides = { ...settings.keybindings };
+  // When daily notes are disabled (and the user hasn't explicitly bound
+  // `daily.openToday`), free `Mod+D` so CodeMirror's `selectNextOccurrence`
+  // works out of the box like VS Code.
+  if (!settings.dailyNotesEnabled && overrides['daily.openToday'] === undefined) {
+    overrides['daily.openToday'] = null;
+  }
   return keymap.of(
     [...defaultKeymap, ...searchKeymap]
       .filter(
@@ -290,6 +343,7 @@ const typewriterCompartment = new Compartment();
 const vimCompartment = new Compartment();
 const slashCompartment = new Compartment();
 const foldCompartment = new Compartment();
+const pdfPageBreaksCompartment = new Compartment();
 
 // #222 — Vim's `:w` / `:wq` / `:q` were dead: @replit/codemirror-vim ships no
 // Ex-command handlers (there is no file system in the browser), so typing `:w`
@@ -401,7 +455,61 @@ async function syncSystemClipboardToVimRegister() {
 // declines keys it has no mapping for (Enter, Tab, Mod-*), so list
 // continuation, indentation, autocomplete and app shortcuts still run.
 function vimExtension() {
-  return Prec.highest(vim());
+  applyVimrcMappings(settings.vimrc, Vim as any);
+  let lastInsertMode: boolean | null = null;
+  return [
+    Prec.highest(vim()),
+    EditorView.updateListener.of((u) => {
+      if (!settings.vimAutoSwitchIm || !('__TAURI_INTERNALS__' in window)) return;
+      const cm = getCM(u.view) as { state?: { vim?: { insertMode?: boolean } } } | null;
+      if (!cm?.state?.vim) return;
+      const isInsert = Boolean(cm.state.vim.insertMode);
+      if (lastInsertMode === null) {
+        lastInsertMode = isInsert;
+        if (!isInsert) {
+          void invoke('vim_switch_input_method', { mode: 'normal' }).catch(() => {});
+        }
+        return;
+      }
+      if (isInsert !== lastInsertMode) {
+        lastInsertMode = isInsert;
+        void invoke('vim_switch_input_method', { mode: isInsert ? 'insert' : 'normal' }).catch(() => {});
+      }
+    }),
+    EditorView.domEventHandlers({
+      keydown(e, v) {
+        const cm = getCM(v) as { state?: { vim?: { insertMode?: boolean } } } | null;
+        if (!cm?.state?.vim || cm.state.vim.insertMode) return false;
+        // #492 — In Vim Normal/Visual mode, if an active CJK IME intercepts an
+        // ASCII letter key (`key === 'Process'` or `keyCode === 229`), abort the
+        // IME composition and forward the physical key directly to Vim.
+        if (
+          (e.key === 'Process' || e.keyCode === 229) &&
+          /^Key[A-Z]$/.test(e.code) &&
+          !e.ctrlKey &&
+          !e.metaKey &&
+          !e.altKey
+        ) {
+          const ch = e.shiftKey ? e.code.slice(3) : e.code.slice(3).toLowerCase();
+          e.preventDefault();
+          v.contentDOM.blur();
+          v.contentDOM.focus({ preventScroll: true });
+          Vim.handleKey(cm as any, ch, 'user');
+          return true;
+        }
+        return false;
+      },
+      compositionstart(_e, v) {
+        const cm = getCM(v) as { state?: { vim?: { insertMode?: boolean } } } | null;
+        if (cm?.state?.vim && !cm.state.vim.insertMode) {
+          v.contentDOM.blur();
+          v.contentDOM.focus({ preventScroll: true });
+          return true;
+        }
+        return false;
+      },
+    }),
+  ];
 }
 
 // `?forcePlain` query flag forces the Windows plain-textarea editor on any OS —
@@ -447,10 +555,9 @@ function noteTypedInTextarea(el: HTMLTextAreaElement, event: Event) {
 // composition is in flight the timer is left armed instead (same reasoning as
 // #186: never commit a half-composed doc).
 function flushContentSync() {
-  if (contentSyncTimer) {
-    clearTimeout(contentSyncTimer);
-    contentSyncTimer = null;
-  }
+  if (!contentSyncTimer) return;
+  clearTimeout(contentSyncTimer);
+  contentSyncTimer = null;
   if (!view || view.composing) return;
   const doc = view.state.doc.toString();
   if (doc !== props.tab.content) {
@@ -533,7 +640,7 @@ const plainEditor = ref<HTMLTextAreaElement | null>(null);
 const plainHostEl = ref<HTMLDivElement | null>(null);
 const plainLiveHost = ref<HTMLDivElement | null>(null);
 const plainBlockEditors = ref<Record<number, HTMLTextAreaElement | null>>({});
-const plainText = ref(props.tab.content || '');
+const plainText = ref((props.tab.content || '').replace(/\r\n?/g, '\n'));
 const plainActiveBlock = ref(0);
 // Select-all in the block live editor (user feedback, 4.8.10): native Ctrl+A
 // inside the active block's <textarea> can only reach that block, so "全选"
@@ -545,7 +652,6 @@ const plainSelectAll = ref(false);
 // selection and must not be mistaken for "user collapsed it — exit".
 let plainSelectAllPending = false;
 const plainComposing = ref(false);
-let plainMermaidIdSeq = 0;
 const plainRenderCache = new Map<string, string>();
 // Bumps when KaTeX / highlight.js finish loading (lib/render-deps.ts). Part
 // of the cache key below, so blocks rendered with placeholder math / plain
@@ -654,8 +760,8 @@ watch(
 );
 watch(plainText, schedulePlainGutter);
 watch(
-  () => [settings.wordWrap, settings.fontSize, settings.fontFamily],
-  () => nextTick(schedulePlainGutter),
+  () => [settings.wordWrap, settings.fontSize, settings.fontFamily, settings.showLineNumbers],
+  () => nextTick(recomputePlainGutter),
 );
 onBeforeUnmount(() => {
   plainGutterRO?.disconnect();
@@ -737,42 +843,206 @@ watch(plainText, (text) => {
   if (changed) plainFolds.value = next;
 });
 
-const plainBlocks = computed<PlainBlock[]>(() => {
-  if (!plainLiveEnabled.value) return [];
-  // Select-all mode (user feedback, 4.8.10): the whole document is presented
-  // as ONE active block so the <textarea>'s native selection can span it.
-  // Every selection consumer then works untouched — Ctrl+C/X, Delete,
-  // type-over, IME composition-over-selection (a WebView2 minefield we must
-  // not reimplement), and the toolbar/⌘J AI-rewrite absolute offsets.
-  if (plainSelectAll.value) {
-    const src = plainText.value || '';
-    return [{ id: 'select-all', start: 0, end: src.length, text: src, hasTrailingNewline: false, html: '' }];
-  }
-  return splitPlainMarkdownBlocks(plainText.value || '').map((block, index) => ({
-    ...block,
-    id: `${block.start}:${index}`,
-    html: index === plainActiveBlock.value ? '' : renderPlainBlock(block.text),
-  }));
-});
+const plainSourceFoldOverrides = ref<Record<number, boolean>>({});
 
-function plainTocFingerprint(source: string): string {
-  // FNV-1a keeps the cache key compact even for very large documents. The
-  // source itself is still passed to renderMarkdown, but is not retained in up
-  // to 300 historical Map keys while the user edits headings.
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < source.length; i++) {
-    hash = Math.imul(hash ^ source.charCodeAt(i), 0x01000193);
+function togglePlainBlockSourceFold(block: PlainBlock, index: number) {
+  const nextCollapsed = !block.sourceCollapsed;
+  plainSourceFoldOverrides.value = {
+    ...plainSourceFoldOverrides.value,
+    [block.start]: nextCollapsed,
+  };
+  if (!nextCollapsed) {
+    activatePlainBlock(index, 0, true);
   }
-  return `${source.length}:${(hash >>> 0).toString(36)}`;
 }
 
-function renderPlainBlock(src: string): string {
+// Decouple heavy full-document Markdown splitting & rendering from
+// `plainActiveBlock` changes! Previously `plainBlocks` depended directly on
+// `plainActiveBlock.value`, AND `renderPlainBlock` cleared `plainRenderCache`
+// whenever `.size > 300`, so every search keystroke / Enter jump in a >300-block
+// `.md` file re-split and re-rendered the entire document from scratch.
+let prevPlainBlocksMap = new Map<string, PlainBlock>();
+
+const plainParsedBlocks = computed<PlainBlock[]>(() => {
+  if (!plainLiveEnabled.value) {
+    prevPlainBlocksMap.clear();
+    return [];
+  }
+  // Select-all mode (user feedback, 4.8.10): the whole document is presented
+  // as ONE active block so the <textarea>'s native selection can span it.
+  if (plainSelectAll.value) {
+    const src = plainText.value || '';
+    const lineCount = src.split('\n').length;
+    return [
+      {
+        id: 'select-all',
+        start: 0,
+        end: src.length,
+        text: src,
+        hasTrailingNewline: false,
+        html: '',
+        isTable: false,
+        startLine: 1,
+        lineCount,
+      },
+    ];
+  }
+  const fullSrc = plainText.value || '';
+  const imageRoot = extractMarkdownImageRoot(fullSrc);
+  const overrides = plainSourceFoldOverrides.value;
+  const collapseDefault = settings.collapseBlockSource;
+  const plantumlKey = settings.plantumlEnabled ? settings.plantumlServer || '' : '';
+  const tocSig = fullSrc.includes('[TOC]') || fullSrc.includes('[toc]') ? plainTocFingerprint(fullSrc) : '';
+  const nextMap = new Map<string, PlainBlock>();
+  let runningLine = 1;
+  const result = splitPlainMarkdownBlocks(fullSrc).map((block, index) => {
+    const startLine = runningLine;
+    const lineCount = block.text.split('\n').length;
+    runningLine += lineCount;
+    const hasCustomFold = Object.prototype.hasOwnProperty.call(overrides, block.start);
+    const foldFlag = hasCustomFold ? String(overrides[block.start]) : `def:${collapseDefault}`;
+    const isTocBlock = tocSig !== '' && /^\s*\[toc\]\s*$/im.test(block.text);
+    const reuseKey = `${index}\0${block.start}\0${startLine}\0${block.hasTrailingNewline ? 1 : 0}\0${foldFlag}\0${imageRoot ?? ''}\0${plantumlKey}\0${isTocBlock ? tocSig : ''}\0${block.text}`;
+    const prev = prevPlainBlocksMap.get(reuseKey);
+    if (prev) {
+      nextMap.set(reuseKey, prev);
+      return prev;
+    }
+    const isTableBlock = parseTable(block.text) !== null;
+    const isMermaid =
+      /^\s*(`{3,}|~{3,})\s*mermaid\b/i.test(block.text) ||
+      (Boolean(plantumlKey) && /^\s*(`{3,}|~{3,})\s*(?:plantuml|puml)\b/i.test(block.text));
+    const sourceCollapsed =
+      isTableBlock || isMermaid
+        ? (overrides[block.start] ?? collapseDefault)
+        : false;
+    const isTable = isTableBlock && sourceCollapsed;
+    const isImageBlock = isStandaloneImageLine(block.text);
+    const headingMatch = /^\s*(#{1,6})\s+/.exec(block.text);
+    const headingLevel = headingMatch && !block.text.includes('\n') ? headingMatch[1].length : 0;
+    const created: PlainBlock = {
+      ...block,
+      id: `${block.start}:${index}`,
+      isTable,
+      isTableBlock,
+      isMermaid,
+      isImageBlock,
+      sourceCollapsed,
+      headingLevel,
+      startLine,
+      lineCount,
+      html: renderPlainBlock(block.text, imageRoot),
+    };
+    nextMap.set(reuseKey, created);
+    return created;
+  });
+  prevPlainBlocksMap = nextMap;
+  return result;
+});
+
+const plainBlocks = plainParsedBlocks;
+
+const plainTableHandles = new WeakMap<HTMLElement, DomTableEditorHandle>();
+
+function plainTocFingerprint(source: string): string {
+  // Fingerprint only ATX/Setext heading lines so typing ordinary prose does not
+  // invalidate cached `[TOC]` blocks across a large document.
+  const headingMatches = source.match(/^[ \t]{0,3}(?:#{1,6}[ \t].+|(?:=+|-+)[ \t]*)$/gm);
+  const sig = headingMatches ? headingMatches.join('\n') : '';
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < sig.length; i++) {
+    hash = Math.imul(hash ^ sig.charCodeAt(i), 0x01000193);
+  }
+  return `${sig.length}:${(hash >>> 0).toString(36)}`;
+}
+
+function escapePlainHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function formatPlainInlineWithMarkers(raw: string): string {
+  const codeSpans: string[] = [];
+  const withCodePlaceholders = raw.replace(/(`+)([^`\n]+?)\1/g, (_m, ticks: string, inner: string) => {
+    const idx = codeSpans.length;
+    codeSpans.push(
+      `<span class="plain-md-marker">${escapePlainHtml(ticks)}</span><code>${escapePlainHtml(inner)}</code><span class="plain-md-marker">${escapePlainHtml(ticks)}</span>`,
+    );
+    return `\u0000CODE${idx}\u0000`;
+  });
+  let out = escapePlainHtml(withCodePlaceholders);
+  out = out.replace(
+    /\[\[([^\]\n]+)\]\]/g,
+    '<span class="plain-md-marker">[[</span><a class="md-wikilink" data-wikilink="$1">$1</a><span class="plain-md-marker">]]</span>',
+  );
+  out = out.replace(
+    /\[([^\]\n]+)\]\(([^)\n]+)\)/g,
+    '<span class="plain-md-marker">[</span><a href="$2">$1</a><span class="plain-md-marker">]($2)</span>',
+  );
+  out = out.replace(
+    /(\*\*|__)([^\n]+?)\1/g,
+    '<span class="plain-md-marker">$1</span><strong>$2</strong><span class="plain-md-marker">$1</span>',
+  );
+  out = out.replace(
+    /(~~)([^\n]+?)\1/g,
+    '<span class="plain-md-marker">$1</span><del>$2</del><span class="plain-md-marker">$1</span>',
+  );
+  out = out.replace(
+    /(==)([^\n]+?)\1/g,
+    '<span class="plain-md-marker">$1</span><mark>$2</mark><span class="plain-md-marker">$1</span>',
+  );
+  out = out.replace(
+    /(^|[^*])(\*)([^*\n]+?)\2(?!\*)/g,
+    '$1<span class="plain-md-marker">$2</span><em>$3</em><span class="plain-md-marker">$2</span>',
+  );
+  out = out.replace(/\u0000CODE(\d+)\u0000/g, (_m, idx) => codeSpans[Number(idx)] ?? '');
+  return out;
+}
+
+/**
+ * #536 — When `alwaysShowMarkers` is on in the Windows plain-block live editor,
+ * render text/heading/list/quote blocks with their exact Markdown markers preserved
+ * and matching `.plain-block__textarea` box metrics so clicking any line never
+ * causes layout shift or page jumping.
+ */
+function renderPlainVisibleMarkers(src: string): string {
+  const singleHeading = /^(\s*(#{1,6})\s+)(.*)$/.exec(src);
+  if (singleHeading && !src.includes('\n')) {
+    const level = singleHeading[2].length;
+    return `<h${level} class="plain-block__markers"><span class="plain-md-marker">${escapePlainHtml(singleHeading[1])}</span>${formatPlainInlineWithMarkers(singleHeading[3])}</h${level}>`;
+  }
+  const lines = src.split('\n').map((line) => {
+    if (/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      return `<span class="plain-md-marker">${escapePlainHtml(line)}</span>`;
+    }
+    const prefixMatch = /^(\s*(?:[-+*]\s+\[[ xX]\]\s+|(?:[-+*]|\d+[.)])\s+|(?:>\s?)+|#{1,6}\s+))(.*)$/.exec(
+      line,
+    );
+    if (prefixMatch) {
+      return `<span class="plain-md-marker">${escapePlainHtml(prefixMatch[1])}</span>${formatPlainInlineWithMarkers(prefixMatch[2])}`;
+    }
+    return formatPlainInlineWithMarkers(line);
+  });
+  return `<div class="plain-block__markers">${lines.join('\n')}</div>`;
+}
+
+const PLAIN_RENDER_CACHE_MAX = 4000;
+function putPlainRenderCache(key: string, html: string): void {
+  if (plainRenderCache.has(key)) plainRenderCache.delete(key);
+  plainRenderCache.set(key, html);
+  if (plainRenderCache.size > PLAIN_RENDER_CACHE_MAX) {
+    const oldest = plainRenderCache.keys().next().value;
+    if (oldest !== undefined) plainRenderCache.delete(oldest);
+  }
+}
+
+function renderPlainBlock(src: string, precomputedRoot?: string | null): string {
   // A standalone thematic-break block ("---" / "***" / "___") would be misread
   // as a YAML front-matter fence when rendered in isolation (each block renders
   // on its own), producing an empty md-frontmatter element instead of a rule.
-  // Emit the <hr> directly.
-  if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(src)) return '<hr>';
-  const root = extractMarkdownImageRoot(plainText.value || '');
+  // Emit the <hr> directly when markers are hidden.
+  if (!settings.alwaysShowMarkers && /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(src)) return '<hr>';
+  const root =
+    precomputedRoot !== undefined ? precomputedRoot : extractMarkdownImageRoot(plainText.value || '');
   // #141 — the hard-breaks flag is part of the cache key so toggling the
   // setting invalidates previously rendered blocks. The per-call `breaks`
   // override is gone: the shared md singleton now follows the setting, so
@@ -783,37 +1053,131 @@ function renderPlainBlock(src: string): string {
   // change when any of those headings changes.
   const tocSource = isTocBlock ? plainText.value || '' : undefined;
   const tocKey = tocSource === undefined ? '' : `\u0000toc:${plainTocFingerprint(tocSource)}`;
-  const key = `${settings.markdownHardBreaks ? 'hb' : 'sb'}${settings.markdownAutoNumberHeadings ? 'nh' : ''}d${renderDepsVersion.value}\u0000${props.tab.filePath || ''}\u0000${root}\u0000${src}${tocKey}`;
+  const key = `${settings.markdownHardBreaks ? 'hb' : 'sb'}${settings.markdownAutoNumberHeadings ? 'nh' : ''}${settings.alwaysShowMarkers ? 'mk2' : ''}d${renderDepsVersion.value}\u0000${props.tab.filePath || ''}\u0000${root}\u0000${src}${tocKey}`;
   const cached = plainRenderCache.get(key);
   if (cached != null) return cached;
+
+  const isRichBlock =
+    isTocBlock ||
+    parseTable(src) !== null ||
+    /^\s*(`{3,}|~{3,})/.test(src) ||
+    /^\s*(\$\$|\\\[)/.test(src) ||
+    /!\[[^\]]*\]\(|!\[[^\]]*\]\[/.test(src) ||
+    /^\s*<[a-zA-Z]/.test(src);
+
+  if (settings.alwaysShowMarkers && !isRichBlock) {
+    const html = renderPlainVisibleMarkers(src);
+    putPlainRenderCache(key, html);
+    return html;
+  }
+
+  const indent = parseTable(src) !== null ? commonIndent(src) : '';
+  const mdInput =
+    indent.length > 0
+      ? src
+          .split('\n')
+          .map((l) => (l.startsWith(indent) ? l.slice(indent.length) : l))
+          .join('\n')
+      : src || '\n';
+  const rendered = renderMarkdown(mdInput, { tocSource })
+    .replace(
+      /(<input class="task-list-item-checkbox" type="checkbox"[^>]*?)\s+disabled=""/g,
+      '$1',
+    )
+    // #366 — markdown-it emits a hard break as `<br>\n`. Rendered `<p>` here
+    // is `white-space: pre-wrap`, so that `\n` became a SECOND line break:
+    // every line of a multi-line paragraph rendered double-spaced, then
+    // snapped back to single spacing when clicked into (the textarea) — the
+    // block's height halved/doubled on each click and the page jumped.
+    .replace(/<br>\n/g, '<br>');
   const html = rewriteImageUrls(
-    // Drop `disabled` on task checkboxes so they can be clicked to toggle in the
-    // preview (handled by activatePlainBlockFromClick → togglePlainTask).
-    renderMarkdown(src || '\n', { tocSource })
-      .replace(
-        /(<input class="task-list-item-checkbox" type="checkbox"[^>]*?)\s+disabled=""/g,
-        '$1',
-      )
-      // #366 — markdown-it emits a hard break as `<br>\n`. Rendered `<p>` here
-      // is `white-space: pre-wrap`, so that `\n` became a SECOND line break:
-      // every line of a multi-line paragraph rendered double-spaced, then
-      // snapped back to single spacing when clicked into (the textarea) — the
-      // block's height halved/doubled on each click and the page jumped.
-      .replace(/<br>\n/g, '<br>'),
+    rendered,
     root,
     props.tab.filePath,
   );
-  plainRenderCache.set(key, html);
-  if (plainRenderCache.size > 300) plainRenderCache.clear();
+  putPlainRenderCache(key, html);
   return html;
 }
 
 
-async function processPlainLiveRenderedBlocks() {
+async function processPlainLiveRenderedBlocks(onlyBlockIndex?: number) {
   if (!plainLiveEnabled.value || !plainLiveHost.value) return;
   await nextTick();
-  const hostEl = plainLiveHost.value;
+  const rootHost = plainLiveHost.value;
+  if (!rootHost) return;
+  const hostEl: HTMLElement =
+    onlyBlockIndex !== undefined
+      ? (rootHost.querySelectorAll<HTMLElement>('.plain-block')[onlyBlockIndex] ?? rootHost)
+      : rootHost;
   installSvgImageFallbacks(hostEl);
+
+  // #500 — Bind Excel-like in-place table cell editing to rendered table blocks
+  // on the Windows plain live block editor so tables stay rendered and never
+  // collapse back into raw pipe source in a <textarea>.
+  const tableRenders = hostEl.querySelectorAll<HTMLElement>(
+    '.plain-block__render--table[data-table-block-index]',
+  );
+  for (const renderEl of Array.from(tableRenders)) {
+    const blockIdx = Number(renderEl.dataset.tableBlockIndex ?? -1);
+    const block = plainBlocks.value[blockIdx];
+    if (!block || !block.isTable) continue;
+    const textEnd = block.start + block.text.length;
+    const bindKey = `${block.start}:${textEnd}:${block.text}`;
+    if (renderEl.dataset.tableBoundKey === bindKey) continue;
+    renderEl.dataset.tableBoundKey = bindKey;
+    const handle = bindDomTableCellEditor(renderEl, {
+      source: block.text,
+      from: block.start,
+      to: textEnd,
+      isReadOnly: () => false,
+      commitMarkdown: (markdown, nextFocus) => {
+        const nextCaret = nextFocus
+          ? block.start + cellStart(markdown, nextFocus.row, nextFocus.col)
+          : block.start;
+        replaceDocRange(block.start, textEnd, markdown, nextCaret);
+      },
+      exitTable: (direction) => {
+        if (direction === 'before') {
+          if (blockIdx > 0) {
+            const prevBlock = plainBlocks.value[blockIdx - 1];
+            activatePlainBlock(blockIdx - 1, prevBlock ? prevBlock.text.length : 0);
+          }
+        } else if (direction === 'after') {
+          if (blockIdx + 1 < plainBlocks.value.length) {
+            activatePlainBlock(blockIdx + 1, 0);
+          } else {
+            const doc = plainText.value || '';
+            const suffix = doc.endsWith('\n\n') ? '' : doc.endsWith('\n') ? '\n' : '\n\n';
+            if (suffix) {
+              replaceDocRange(doc.length, doc.length, suffix, doc.length + suffix.length);
+            }
+          }
+        }
+      },
+      onUndo: () => {
+        plainUndo();
+        return true;
+      },
+      onRedo: () => {
+        plainRedo();
+        return true;
+      },
+    });
+    if (handle) {
+      plainTableHandles.set(renderEl, handle);
+      renderEl.addEventListener('mousedown', (ev: MouseEvent) => {
+        if (ev.button !== 0) return;
+        const target = ev.target as Element | null;
+        if (target?.closest?.('a')) return;
+        const cell = target?.closest?.('th, td') as HTMLTableCellElement | null;
+        if (cell && handle.begin(ev, cell)) {
+          plainActiveBlock.value = blockIdx;
+          ev.preventDefault();
+          ev.stopPropagation();
+        }
+      });
+    }
+  }
 
   // v4.10 #163 — PlantUML fences (opt-in), same <img> swap as the preview pane.
   if (settings.plantumlEnabled && settings.plantumlServer) {
@@ -840,33 +1204,28 @@ async function processPlainLiveRenderedBlocks() {
   }
 
   const mermaidBlocks = hostEl.querySelectorAll('.plain-block__render pre > code.language-mermaid');
-  // Configure on demand rather than at setup: the theme is read here, so a
-  // theme switch between renders is picked up, and a vault with no diagrams
-  // never loads the renderer at all.
-  const mermaid = mermaidBlocks.length
-    ? await initMermaid({
-        startOnLoad: false,
-        securityLevel: 'strict',
-        theme: mermaidThemeFor(settings.theme),
-      })
-    : null;
+  // #522 — no eager `initMermaid` here. Each render goes through the shared
+  // page-wide queue (serialised, yielding between jobs) and the theme+source
+  // cache, so a 50-diagram note no longer blocks this pass for a minute and
+  // re-opening the same note costs nothing. The plain view has no viewport
+  // gating: all of its blocks are on screen at once and need their SVG.
+  const mermaidTheme = mermaidThemeFor(settings.theme);
   for (const block of Array.from(mermaidBlocks)) {
-    if (!mermaid) break;
     const pre = block.parentElement as HTMLElement | null;
     if (!pre || pre.dataset.rendered === '1') continue;
     pre.dataset.rendered = '1';
     const code = (block.textContent || '').trim();
-    const id = `plain-mmd-${++plainMermaidIdSeq}`;
-    try {
-      const { svg, bindFunctions } = await mermaid.render(id, code);
+    const result = await renderMermaidCached(mermaidTheme, code);
+    if (!pre.isConnected) continue; // the plain view was rebuilt while queued
+    if (result.svg) {
       const wrap = document.createElement('div');
       wrap.className = 'plain-mermaid-block';
-      wrap.innerHTML = svg;
+      wrap.innerHTML = result.svg;
       pre.replaceWith(wrap);
-      bindMermaidInteractions(wrap, bindFunctions);
-    } catch (e) {
+      bindMermaidInteractions(wrap, result.bindFunctions);
+    } else {
       pre.classList.add('plain-block__broken');
-      pre.textContent = `Mermaid error: ${(e as Error).message}`;
+      pre.textContent = `Mermaid error: ${result.error ?? 'unknown error'}`;
     }
   }
 
@@ -942,189 +1301,6 @@ function attachPlainCodeCopyButtons(hostEl: HTMLElement) {
     label: t('toolbar.copy'),
     onError: (err) => toasts.error(`Copy failed: ${err}`),
   });
-}
-
-function splitPlainMarkdownBlocks(
-  src: string,
-): Array<{ start: number; end: number; text: string; hasTrailingNewline: boolean }> {
-  if (!src) return [{ start: 0, end: 0, text: '', hasTrailingNewline: false }];
-
-  const lines: Array<{ start: number; end: number; text: string; raw: string }> = [];
-  let pos = 0;
-  while (pos < src.length) {
-    const nl = src.indexOf('\n', pos);
-    const end = nl >= 0 ? nl + 1 : src.length;
-    const raw = src.slice(pos, end);
-    lines.push({
-      start: pos,
-      end,
-      raw,
-      text: raw.endsWith('\n') ? raw.slice(0, -1) : raw,
-    });
-    pos = end;
-  }
-
-  const blocks: Array<{ start: number; end: number; text: string; hasTrailingNewline: boolean }> = [];
-  const pushRange = (start: number, end: number) => {
-    if (end < start) return;
-    // The editable text must NOT carry the block-separating trailing newline.
-    // Keeping it created a phantom empty last line in the active <textarea>:
-    // the caret could land after it and typed/IME-committed text dropped onto a
-    // fresh line ("每输入一个换一行"). start/end still cover the full range so the
-    // separator is reconstructed in updatePlainBlock.
-    const raw = src.slice(start, end);
-    const hasTrailingNewline = raw.endsWith('\n');
-    blocks.push({ start, end, text: hasTrailingNewline ? raw.slice(0, -1) : raw, hasTrailingNewline });
-  };
-  const kindFor = (line: { text: string }) => {
-    const text = line.text;
-    const trimmed = text.trim();
-    if (trimmed === '') return 'blank';
-    if (/^(```|~~~)/.test(trimmed)) return 'fence';
-    // #250 — a `$$` block is one block, like a code fence. Without this the
-    // splitter walked into it line by line and any line indented 4+ spaces
-    // (routine inside `aligned`) became its own indented-code block, so the
-    // formula rendered as three pieces with a grey slab in the middle.
-    // `$$E=mc^2$$` closes on its own line and is not an opener.
-    if (
-      (/^\$\$/.test(trimmed) && !/^\$\$.*\$\$$/.test(trimmed)) ||
-      (/^\\\[/.test(trimmed) && !/^\\\[.*\\\]$/.test(trimmed))
-    ) {
-      return 'mathfence';
-    }
-    if (/^#{1,6}\s+/.test(trimmed)) return 'heading';
-    if (/^(---|\*\*\*|___)\s*$/.test(trimmed)) return 'thematic';
-    if (/^\s{0,3}>\s?/.test(text)) return 'quote';
-    if (/^\s{0,3}([-+*]|\d+[.)])\s+/.test(text)) return 'list';
-    if (/^\s{0,3}([-*])\s+\[[ xX]\]\s+/.test(text)) return 'list';
-    if (/^\s{0,3}\|.*\|\s*$/.test(text)) return 'table';
-    if (/^\s{4,}\S/.test(text)) return 'indented';
-    return 'paragraph';
-  };
-
-  for (let i = 0; i < lines.length;) {
-    const line = lines[i];
-    const kind = kindFor(line);
-
-    if (kind === 'blank' || kind === 'heading' || kind === 'thematic') {
-      pushRange(line.start, line.end);
-      i++;
-      continue;
-    }
-
-    if (kind === 'mathfence') {
-      // Consume through the closing `$$` or `\]`; an unclosed block runs to the
-      // end of the document, matching the code-fence branch below.
-      const closeMarker = line.text.trim().startsWith('\\[') ? '\\]' : '$$';
-      let j = i + 1;
-      while (j < lines.length) {
-        const t = lines[j].text.trim();
-        j++;
-        if (t.endsWith(closeMarker)) break;
-      }
-      pushRange(line.start, lines[j - 1]?.end ?? line.end);
-      i = j;
-      continue;
-    }
-
-    if (kind === 'fence') {
-      const marker = line.text.trim().startsWith('~~~') ? '~~~' : '```';
-      let j = i + 1;
-      while (j < lines.length) {
-        if (lines[j].text.trim().startsWith(marker)) {
-          j++;
-          break;
-        }
-        j++;
-      }
-      pushRange(line.start, lines[j - 1]?.end ?? line.end);
-      i = j;
-      continue;
-    }
-
-    if (kind === 'table') {
-      let j = i + 1;
-      while (j < lines.length && (kindFor(lines[j]) === 'table' || /^\s{0,3}\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[j].text))) j++;
-      pushRange(line.start, lines[j - 1]?.end ?? line.end);
-      i = j;
-      continue;
-    }
-
-    if (kind === 'list') {
-      let j = i + 1;
-      while (j < lines.length) {
-        const nextLine = lines[j];
-        const nextKind = kindFor(nextLine);
-        const isIndentedContinuation = /^[ \t]{2,}\S/.test(nextLine.text);
-        if ((nextKind === 'fence' || nextKind === 'mathfence') && isIndentedContinuation) {
-          const trimmedNext = nextLine.text.trim();
-          const closeMarker = nextKind === 'fence'
-            ? (trimmedNext.startsWith('~~~') ? '~~~' : '```')
-            : (trimmedNext.startsWith('\\[') ? '\\]' : '$$');
-          j++;
-          while (j < lines.length) {
-            const t = lines[j].text.trim();
-            j++;
-            if (nextKind === 'fence' ? t.startsWith(closeMarker) : t.endsWith(closeMarker)) break;
-          }
-          continue;
-        }
-        if (nextKind === 'list' || isIndentedContinuation) {
-          j++;
-          continue;
-        }
-        if (nextKind === 'blank' && j + 1 < lines.length) {
-          const afterBlank = lines[j + 1];
-          if (kindFor(afterBlank) === 'list' || /^[ \t]{2,}\S/.test(afterBlank.text)) {
-            j++;
-            continue;
-          }
-        }
-        break;
-      }
-      pushRange(line.start, lines[j - 1]?.end ?? line.end);
-      i = j;
-      continue;
-    }
-
-    if (kind === 'quote' || kind === 'indented') {
-      let j = i + 1;
-      while (j < lines.length) {
-        const nextKind = kindFor(lines[j]);
-        if (nextKind !== kind && nextKind !== 'blank') break;
-        if (nextKind === 'blank' && j + 1 < lines.length && kindFor(lines[j + 1]) !== kind) break;
-        j++;
-      }
-      pushRange(line.start, lines[j - 1]?.end ?? line.end);
-      i = j;
-      continue;
-    }
-
-    let j = i + 1;
-    while (j < lines.length && kindFor(lines[j]) === 'paragraph') j++;
-    pushRange(line.start, lines[j - 1]?.end ?? line.end);
-    i = j;
-  }
-
-  if (blocks.length === 0) {
-    const hasTrailingNewline = src.endsWith('\n');
-    return [
-      {
-        start: 0,
-        end: src.length,
-        text: hasTrailingNewline ? src.slice(0, -1) : src,
-        hasTrailingNewline,
-      },
-    ];
-  }
-  // A document that ends with a newline has an empty final line. Represent it as
-  // its own (zero-width) block so the caret has somewhere to land when the user
-  // presses Enter at the end of the last line — otherwise the newline is absorbed
-  // as a separator with no following block and the caret appears not to move.
-  if (src.endsWith('\n')) {
-    blocks.push({ start: src.length, end: src.length, text: '', hasTrailingNewline: false });
-  }
-  return blocks;
 }
 
 // #203 — visual-row-accurate line ↔ scrollTop mapping for the plain textarea.
@@ -1233,10 +1409,14 @@ function emitPlainCursorAndSelection() {
     const block = plainBlocks.value[plainActiveBlock.value];
     if (!el || !block) return;
     const head = (el.selectionDirection === 'backward' ? el.selectionStart : el.selectionEnd) ?? 0;
-    const before = plainText.value.slice(0, block.start) + el.value.slice(0, head);
-    const lines = before.split('\n');
-    const line = lines.length;
-    const col = lines[lines.length - 1]?.length ?? 0;
+    let subLines = 0;
+    for (let k = 0; k < head; k++) {
+      if (el.value.charCodeAt(k) === 10) subLines++;
+    }
+    const line = block.startLine + subLines;
+    const lastNl = head > 0 ? el.value.lastIndexOf('\n', head - 1) : -1;
+    const col = head - (lastNl + 1);
+    getCursorHistory().record({ path: props.tab.filePath || props.tab.id, pos: block.start + head, line });
     emit('cursor', line, col + 1);
     emit('selection', plainSelectionText());
     if ((el.selectionStart ?? 0) === (el.selectionEnd ?? 0)) {
@@ -1247,9 +1427,10 @@ function emitPlainCursorAndSelection() {
   const el = plainEditor.value;
   if (!el) return;
   const head = (el.selectionDirection === 'backward' ? el.selectionStart : el.selectionEnd) ?? 0;
-  const lines = el.value.slice(0, head).split('\n');
-  const line = lines.length;
-  const col = lines[lines.length - 1]?.length ?? 0;
+  const line = lineAt(el.value, head);
+  const lastNl = head > 0 ? el.value.lastIndexOf('\n', head - 1) : -1;
+  const col = head - (lastNl + 1);
+  getCursorHistory().record({ path: props.tab.filePath || props.tab.id, pos: head, line });
   emit('cursor', line, col + 1);
   emit('selection', plainSelectionText());
   if ((el.selectionStart ?? 0) === (el.selectionEnd ?? 0)) {
@@ -1545,7 +1726,7 @@ function handlePlainPaste(event: ClipboardEvent) {
       it.type.startsWith('image/'),
     );
     if (!hasImage) {
-      const raw = event.clipboardData.getData('text/plain');
+      const raw = getPlainTextFromClipboardData(event.clipboardData);
       const el = event.currentTarget as HTMLTextAreaElement | null;
       if (raw && el) {
         const from = el.selectionStart ?? 0;
@@ -1570,10 +1751,28 @@ function plainInsertText(snippet: string) {
   if (plainLiveEnabled.value) {
     const index = plainActiveBlock.value;
     const el = plainBlockEditors.value[index];
-    if (!el) return;
+    const block = plainBlocks.value[index];
+    if (!el) {
+      if (!block) return;
+      const insertAt = block.start + block.text.length;
+      const prefix = snippet.startsWith('\n') ? '\n' : '\n\n';
+      const inserted = `${prefix}${parsed.text}`;
+      const trimmed = parsed.text.replace(/^\n+/, '');
+      if (settings.collapseBlockSource && parseTable(trimmed.trim()) !== null) {
+        const leadingNewlines = inserted.length - inserted.replace(/^\n+/, '').length;
+        requestTableCellFocus(insertAt + leadingNewlines, HEADER_ROW, 0);
+      }
+      replaceDocRange(insertAt, insertAt, inserted, insertAt + prefix.length + parsed.head);
+      return;
+    }
     const start = el.selectionStart ?? 0;
     const end = el.selectionEnd ?? 0;
     const nextBlock = `${el.value.slice(0, start)}${parsed.text}${el.value.slice(end)}`;
+    const trimmed = parsed.text.replace(/^\n+/, '');
+    if (block && settings.collapseBlockSource && parseTable(trimmed.trim()) !== null) {
+      const leadingNewlines = parsed.text.length - trimmed.length;
+      requestTableCellFocus(block.start + start + leadingNewlines, HEADER_ROW, 0);
+    }
     // Blocks re-split after the edit, so only a caret survives here; it goes
     // after any placeholder label.
     updatePlainBlock(index, nextBlock, start + parsed.head);
@@ -1604,7 +1803,8 @@ function focusPlainEditor(preventScroll = false) {
   });
 }
 
-function syncPlainEditorFromStore(text: string, preserveCaret = false) {
+function syncPlainEditorFromStore(rawText: string, preserveCaret = false) {
+  const text = (rawText || '').replace(/\r\n?/g, '\n');
   const el = plainEditor.value;
   plainText.value = text;
   if (!el) {
@@ -1678,7 +1878,7 @@ function handlePlainInput(event: Event) {
   if (plainComposing.value && (event as InputEvent).isComposing === false) {
     plainComposing.value = false;
   }
-  if (!plainComposing.value) {
+  if (!plainComposing.value && el.value !== plainText.value) {
     recordPlainHistory();
     if (props.tab.language === 'markdown') {
       const selPos = el.selectionStart ?? 0;
@@ -1768,6 +1968,14 @@ function applyPlainContent(content: string, caret: number) {
 }
 
 function plainUndo() {
+  // #512 — Skip any duplicate no-op snapshots at the top of the stack so the
+  // first Ctrl+Z after a mode switch or composition commit always undoes real text.
+  while (
+    plainUndoStack.length &&
+    plainUndoStack[plainUndoStack.length - 1].content === plainText.value
+  ) {
+    plainUndoStack.pop();
+  }
   if (!plainUndoStack.length) return;
   plainRedoStack.push({ content: plainText.value, caret: plainAbsoluteCaret() });
   const prev = plainUndoStack.pop() as PlainSnapshot;
@@ -1776,6 +1984,12 @@ function plainUndo() {
 }
 
 function plainRedo() {
+  while (
+    plainRedoStack.length &&
+    plainRedoStack[plainRedoStack.length - 1].content === plainText.value
+  ) {
+    plainRedoStack.pop();
+  }
   if (!plainRedoStack.length) return;
   plainUndoStack.push({ content: plainText.value, caret: plainAbsoluteCaret() });
   const next = plainRedoStack.pop() as PlainSnapshot;
@@ -1792,8 +2006,9 @@ const plainReplaceValue = ref('');
 const plainFindCaseSensitive = ref(false);
 const plainFindInput = ref<HTMLInputElement | null>(null);
 const plainReplaceInput = ref<HTMLInputElement | null>(null);
-const plainMatches = ref<Array<{ start: number; end: number }>>([]);
+const plainMatches = shallowRef<Array<{ start: number; end: number }>>([]);
 const plainMatchIndex = ref(0);
+let plainFindInputTimer: ReturnType<typeof setTimeout> | null = null;
 // Where the caret was when the find bar opened: typing a query jumps to the
 // first match from here on, the way Notepad and VS Code do, not from the top.
 let plainFindAnchor = 0;
@@ -1803,6 +2018,7 @@ let plainFindAnchor = 0;
 const plainFindBoxes = ref<Array<{ top: number; left: number; width: number; height: number }>>([]);
 // Docks the find bar at the bottom while the current match sits under it.
 const plainFindDodge = ref(false);
+const plainReplaceOpen = ref(false);
 const plainFindBar = ref<HTMLElement | null>(null);
 
 function plainCaretDocOffset(): number {
@@ -1842,12 +2058,14 @@ function openPlainFind(replace = false) {
       closePlainFind(true);
       return;
     }
-    if (replace && document.activeElement === plainReplaceInput.value) {
+    if (replace && plainReplaceOpen.value && document.activeElement === plainReplaceInput.value) {
       closePlainFind(true);
       return;
     }
   }
   plainFindOpen.value = true;
+  if (replace) plainReplaceOpen.value = true;
+  else if (!wasOpen) plainReplaceOpen.value = false;
   if (!wasOpen) plainFindAnchor = plainCaretDocOffset();
   if (selected && !selected.includes('\n')) plainFindQuery.value = selected;
   nextTick(() => {
@@ -1892,7 +2110,23 @@ function onPlainFindKeydown(event: KeyboardEvent) {
  * the editor gets focus from the find bar. Closing because the tab changed
  * must not: the match belongs to the previous document.
  */
+function flushPlainFindInput(): boolean {
+  if (!plainFindInputTimer) return false;
+  clearTimeout(plainFindInputTimer);
+  plainFindInputTimer = null;
+  if (plainFindInput.value && plainFindInput.value.value !== plainFindQuery.value) {
+    plainFindQuery.value = plainFindInput.value.value;
+  }
+  revealPlainMatchFromAnchor();
+  return true;
+}
+
 function closePlainFind(toMatch = false) {
+  if (toMatch) flushPlainFindInput();
+  else if (plainFindInputTimer) {
+    clearTimeout(plainFindInputTimer);
+    plainFindInputTimer = null;
+  }
   const m = plainMatches.value[plainMatchIndex.value];
   plainFindOpen.value = false;
   plainFindBoxes.value = [];
@@ -1920,15 +2154,27 @@ function onPlainFindEnter(event: KeyboardEvent) {
   if (event.isComposing || event.keyCode === 229) return;
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   event.preventDefault();
+  if (flushPlainFindInput()) return;
   gotoPlainMatch(event.shiftKey ? -1 : 1);
 }
 
 function onPlainFindInput(value: string, composing = false) {
-  plainFindQuery.value = value;
-  // Not mid-IME-composition: moving the editor's selection while a Chinese
-  // IME is composing in this box cancels the composition, and the typed
-  // characters vanish. Jump once the composition commits (compositionend).
+  // Not mid-IME-composition: mutating `plainFindQuery` (which binds `:value` on
+  // the <input>) or moving the editor's selection while a CJK IME is composing
+  // disrupts WebView2 / WKWebView IME state. Commit once `compositionend` fires.
   if (composing) return;
+  if (plainFindInputTimer) {
+    clearTimeout(plainFindInputTimer);
+    plainFindInputTimer = null;
+  }
+  plainFindQuery.value = value;
+  if ((plainText.value?.length ?? 0) > 16384 && value.length > 0) {
+    plainFindInputTimer = setTimeout(() => {
+      plainFindInputTimer = null;
+      revealPlainMatchFromAnchor();
+    }, 50);
+    return;
+  }
   revealPlainMatchFromAnchor();
 }
 
@@ -1946,7 +2192,22 @@ function selectPlainRange(start: number, end: number, focusEditor = false) {
     nextTick(() => {
       const el = plainBlockEditors.value[plainActiveBlock.value];
       const b = plainBlocks.value[plainActiveBlock.value];
-      if (!el || !b) return;
+      if (!b) return;
+      if (!el) {
+        // Collapsed table / Mermaid block: no <textarea> is mounted while
+        // `sourceCollapsed` is true, so scroll the rendered block card into view
+        // instead of stalling on the match.
+        const host = plainLiveHost.value;
+        const blockEl = host?.querySelector<HTMLElement>(`[data-plain-block-index="${plainActiveBlock.value}"]`);
+        if (host && blockEl) {
+          const y = blockEl.getBoundingClientRect().top - host.getBoundingClientRect().top + blockEl.offsetHeight / 2;
+          host.scrollTop = Math.max(0, host.scrollTop + y - host.clientHeight / 2);
+        } else {
+          blockEl?.scrollIntoView({ block: 'center' });
+        }
+        plainFindBoxes.value = [];
+        return;
+      }
       // preventScroll: focus() otherwise scrolls the whole textarea into view
       // — for a tall block, its top — and the view visibly bounced from there
       // back to the match (#330).
@@ -1977,9 +2238,16 @@ function selectPlainRange(start: number, end: number, focusEditor = false) {
   if (!el) return;
   if (focusEditor) el.focus({ preventScroll: true });
   el.setSelectionRange(start, end);
-  // #255 — setSelectionRange() selects but never scrolls a <textarea>, so in a
-  // long document the counter moved ("3/12") while the view stayed put.
-  el.scrollTop = Math.max(0, plainPaddingTopPx(el) + caretTopPx(el, el.value, start) - el.clientHeight / 2);
+  // #255 — setSelectionRange() selects but never scrolls a <textarea>.
+  // Mirror only the target's own logical line (combined with `plainLineTopPx`)
+  // instead of laying out the entire multi-thousand-line document in a mirror div!
+  const text = el.value;
+  const lineStart = text.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+  const nl = text.indexOf('\n', lineStart);
+  const lineText = text.slice(lineStart, nl < 0 ? text.length : nl);
+  const point = caretPointPx(el, lineText, start - lineStart);
+  const lineTop = plainLineTopPx(lineAt(text, start), point.height || plainLineHeightPx());
+  el.scrollTop = Math.max(0, plainPaddingTopPx(el) + lineTop + point.top - el.clientHeight / 2);
   emitPlainCursorAndSelection();
   updatePlainFindBoxes();
 }
@@ -2101,9 +2369,19 @@ function updatePlainFindBoxes() {
     const text = el.value;
     const width = el.clientWidth;
     const c = plainFindFlowCache;
-    const rects = c && c.text === text && c.start === m.start && c.end === m.end && c.width === width
-      ? c.rects
-      : matchFlowRects(el, text, m.start, m.end);
+    let rects: Array<{ top: number; left: number; width: number; height: number }>;
+    if (c && c.text === text && c.start === m.start && c.end === m.end && c.width === width) {
+      rects = c.rects;
+    } else {
+      const lineStart = text.lastIndexOf('\n', Math.max(0, m.start - 1)) + 1;
+      const nl = text.indexOf('\n', lineStart);
+      const lineText = text.slice(lineStart, nl < 0 ? text.length : nl);
+      const localEnd = Math.min(lineText.length, m.end - lineStart);
+      const localRects = matchFlowRects(el, lineText, m.start - lineStart, localEnd);
+      const lh = localRects[0]?.height || plainLineHeightPx();
+      const baseTop = plainLineTopPx(lineAt(text, m.start), lh);
+      rects = localRects.map((r) => ({ ...r, top: baseTop + r.top }));
+    }
     plainFindFlowCache = { text, start: m.start, end: m.end, width, rects };
     const container = el.parentElement;
     if (!container) {
@@ -2156,6 +2434,7 @@ function updatePlainFindDodge() {
 }
 
 function gotoPlainMatch(delta: number) {
+  if (flushPlainFindInput()) return;
   if (!plainMatches.value.length) {
     runPlainSearch();
     if (!plainMatches.value.length) return;
@@ -2167,6 +2446,7 @@ function gotoPlainMatch(delta: number) {
 }
 
 function replacePlainCurrent() {
+  flushPlainFindInput();
   const m = plainMatches.value[plainMatchIndex.value];
   if (!m) return;
   recordPlainHistory();
@@ -2196,16 +2476,18 @@ watch(plainText, () => {
 });
 
 function replacePlainAll() {
+  flushPlainFindInput();
   if (!plainFindQuery.value || !plainMatches.value.length) return;
   recordPlainHistory();
   const r = plainReplaceValue.value;
-  let result = '';
+  const parts: string[] = [];
   let last = 0;
   for (const m of plainMatches.value) {
-    result += plainText.value.slice(last, m.start) + r;
+    parts.push(plainText.value.slice(last, m.start), r);
     last = m.end;
   }
-  result += plainText.value.slice(last);
+  parts.push(plainText.value.slice(last));
+  const result = parts.join('');
   applyPlainContent(result, result.length);
   nextTick(runPlainSearch);
 }
@@ -2360,6 +2642,7 @@ function applyPlainAutocomplete(item: AcItem) {
   const el = plainBlockEditors.value[plainActiveBlock.value];
   if (!el || acTriggerStart < 0) { closePlainAutocomplete(); return; }
   const index = plainActiveBlock.value;
+  const oldBlockStart = plainBlocks.value[index]?.start ?? 0;
   const caret = el.selectionStart ?? el.value.length;
   const start = acTriggerStart;
   const lineStart = el.value.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
@@ -2369,14 +2652,19 @@ function applyPlainAutocomplete(item: AcItem) {
     : { text: item.insert, cursorOffset: item.cursorOffset };
   const value = el.value.slice(0, start) + expanded.text + el.value.slice(caret);
   const newCaret = start + expanded.cursorOffset;
+  const absCaret = oldBlockStart + newCaret;
   closePlainAutocomplete();
   updatePlainBlock(index, value, newCaret);
   nextTick(() => {
+    const activeBlock = plainBlocks.value[plainActiveBlock.value];
     const e2 = plainBlockEditors.value[plainActiveBlock.value];
-    if (e2) {
+    if (e2 && activeBlock) {
+      if (e2.value !== activeBlock.text) e2.value = activeBlock.text;
+      autoSizePlainBlock(e2);
       e2.focus();
-      const p = Math.min(newCaret, e2.value.length);
-      e2.setSelectionRange(p, p);
+      const relPos = Math.max(0, Math.min(absCaret - activeBlock.start, e2.value.length));
+      e2.setSelectionRange(relPos, relPos);
+      emitPlainCursorAndSelection();
     }
   });
 }
@@ -2396,7 +2684,9 @@ function computePlainTabEdit(
   el: HTMLTextAreaElement,
   outdent: boolean,
 ): { value: string; selStart: number; selEnd: number } {
-  const INDENT = '  ';
+  // #110 / #159 — 4-space tab indent in source mode so nested ordered/unordered
+  // lists and code blocks satisfy CommonMark 4-space rules.
+  const INDENT = '    ';
   const v = el.value;
   const s = el.selectionStart ?? 0;
   const e = el.selectionEnd ?? 0;
@@ -2417,7 +2707,7 @@ function computePlainTabEdit(
   let deltaTotal = 0;
   const newLines = lines.map((ln, i) => {
     if (outdent) {
-      const m = ln.match(/^( {1,2}|\t)/);
+      const m = ln.match(/^( {1,4}|\t)/);
       const removed = m ? m[0].length : 0;
       if (i === 0) deltaFirst = -removed;
       deltaTotal -= removed;
@@ -2662,15 +2952,32 @@ function handlePlainBlockKeydown(index: number, event: KeyboardEvent) {
       const blocks = plainBlocks.value;
       const pos = el.selectionStart ?? 0;
       const val = el.value;
+      const findNeighborEditableBlock = (fromIdx: number, step: -1 | 1): number => {
+        let cur = fromIdx + step;
+        while (cur >= 0 && cur < blocks.length) {
+          const b = blocks[cur];
+          // #536 — Step past collapsed Mermaid/PlantUML diagram blocks so arrow
+          // keys never get stuck or auto-expand folded diagram source code.
+          if (b && !(b.sourceCollapsed && !b.isTable)) return cur;
+          cur += step;
+        }
+        return -1;
+      };
       if (event.key === 'ArrowLeft' && pos === 0 && index > 0) {
-        event.preventDefault();
-        activatePlainBlock(index - 1, blocks[index - 1]?.text.length ?? 0);
-        return;
+        const prevIdx = findNeighborEditableBlock(index, -1);
+        if (prevIdx >= 0) {
+          event.preventDefault();
+          activatePlainBlock(prevIdx, blocks[prevIdx]?.text.length ?? 0);
+          return;
+        }
       }
       if (event.key === 'ArrowRight' && pos === val.length && index < blocks.length - 1) {
-        event.preventDefault();
-        activatePlainBlock(index + 1, 0);
-        return;
+        const nextIdx = findNeighborEditableBlock(index, 1);
+        if (nextIdx >= 0) {
+          event.preventDefault();
+          activatePlainBlock(nextIdx, 0);
+          return;
+        }
       }
       // ↑/↓ hand-off must key on *visual* rows, not logical lines (#155
       // follow-up): with soft wrap on, a long paragraph is ONE logical line,
@@ -2679,19 +2986,25 @@ function handlePlainBlockKeydown(index: number, event: KeyboardEvent) {
       if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
         const edge = plainCaretEdgeRows(el, val, pos);
         if (event.key === 'ArrowUp' && edge.firstRow && index > 0) {
-          event.preventDefault();
-          const prev = blocks[index - 1]?.text ?? '';
-          // First visual row starts at 0, so the visual column is `pos`.
-          // Land on the previous block's last visual row, same column.
-          activatePlainBlock(index - 1, Math.min(plainLastRowStart(el, prev) + pos, prev.length));
-          return;
+          const prevIdx = findNeighborEditableBlock(index, -1);
+          if (prevIdx >= 0) {
+            event.preventDefault();
+            const prev = blocks[prevIdx]?.text ?? '';
+            // First visual row starts at 0, so the visual column is `pos`.
+            // Land on the previous block's last visual row, same column.
+            activatePlainBlock(prevIdx, Math.min(plainLastRowStart(el, prev) + pos, prev.length));
+            return;
+          }
         }
         if (event.key === 'ArrowDown' && edge.lastRow && index < blocks.length - 1) {
-          event.preventDefault();
-          const next = blocks[index + 1]?.text ?? '';
-          const vcol = pos - plainLastRowStart(el, val);
-          activatePlainBlock(index + 1, Math.min(vcol, plainFirstRowEnd(el, next)));
-          return;
+          const nextIdx = findNeighborEditableBlock(index, 1);
+          if (nextIdx >= 0) {
+            event.preventDefault();
+            const next = blocks[nextIdx]?.text ?? '';
+            const vcol = pos - plainLastRowStart(el, val);
+            activatePlainBlock(nextIdx, Math.min(vcol, plainFirstRowEnd(el, next)));
+            return;
+          }
         }
       }
     }
@@ -2979,7 +3292,11 @@ function estimatePlainBlockCaretFromClick(index: number, event: MouseEvent): num
   const rect = render.getBoundingClientRect();
   const style = window.getComputedStyle(render);
   const lineHeight = Number.parseFloat(style.lineHeight) || (Number.parseFloat(style.fontSize) || 16) * 1.8;
-  const lineIndex = Math.max(0, Math.min(lines.length - 1, Math.floor((event.clientY - rect.top) / lineHeight)));
+  const isFencedBlock = /^[ \t]{0,3}(`{3,}|~{3,})/.test(block.text);
+  const minLine = isFencedBlock && lines.length >= 2 ? 1 : 0;
+  const maxLine = isFencedBlock && lines.length >= 3 ? lines.length - 2 : lines.length - 1;
+  const rawLineIndex = Math.floor((event.clientY - rect.top) / lineHeight) + (isFencedBlock ? 1 : 0);
+  const lineIndex = Math.max(minLine, Math.min(maxLine, rawLineIndex));
   let caret = 0;
   for (let i = 0; i < lineIndex; i++) caret += lines[i].length + 1;
   return caret;
@@ -2995,6 +3312,12 @@ function activatePlainBlockFromClick(index: number, event: MouseEvent) {
   // Clicking a rendered task checkbox toggles its source marker instead of
   // entering edit mode.
   const target = event.target as HTMLElement | null;
+  // A rendered `<details>` folds in place: the summary is a control of the
+  // rendered view, not an editing gesture. Intercepting the click here (or
+  // activating the block on it) replaced the block with its textarea and left
+  // the disclosure triangle inert — the fold could never be opened at all.
+  // No `preventDefault()` either: the native toggle must still run.
+  if (target?.closest('summary')) return;
   if (
     target instanceof HTMLInputElement &&
     target.type === 'checkbox' &&
@@ -3025,6 +3348,10 @@ function activatePlainBlockFromClick(index: number, event: MouseEvent) {
       openRenderedLink(anchor, event, props.tab.filePath);
       return;
     }
+  }
+  if (plainBlocks.value[index]?.sourceCollapsed) {
+    plainActiveBlock.value = index;
+    return;
   }
   if (index === plainActiveBlock.value) return;
   // #300 — a drag that selected rendered text ends in a click too. Turning
@@ -3115,6 +3442,23 @@ function togglePlainTask(index: number, ordinal: number) {
  */
 function activatePlainBlock(index: number, caret?: number, holdScroll = false) {
   const target = Math.max(0, Math.min(index, plainBlocks.value.length - 1));
+  const targetBlock = plainBlocks.value[target];
+  if (targetBlock?.isTable) {
+    plainActiveBlock.value = target;
+    const localCaret = caret != null ? Math.max(0, Math.min(caret, targetBlock.text.length)) : 0;
+    const hit = tableAt(targetBlock.text, localCaret);
+    const row = hit ? hit.row : HEADER_ROW;
+    const col = hit ? hit.col : 0;
+    requestTableCellFocus(targetBlock.start, row, col);
+    nextTick(() => {
+      const renderEl = plainLiveHost.value?.querySelector<HTMLElement>(
+        `.plain-block__render--table[data-table-block-index="${target}"]`,
+      );
+      const handle = renderEl ? plainTableHandles.get(renderEl) : null;
+      handle?.focusCell(row, col, 'end');
+    });
+    return;
+  }
   const host = plainLiveHost.value;
   const blockEl = holdScroll && host
     ? host.querySelectorAll<HTMLElement>(':scope > .plain-block')[target] ?? null
@@ -3203,7 +3547,7 @@ function onPlainLiveHostMouseDown(event: MouseEvent) {
   const host = plainLiveHost.value;
   if (!host || event.button !== 0) return;
   const target = event.target as HTMLElement | null;
-  if (target?.closest('button, input, .plain-find')) return;
+  if (target?.closest('button, input, .plain-find, .plain-block__render--table')) return;
   const clicks = plainClickCount(event);
   if (maybeSelectPlainParagraph(event, clicks)) return;
   if (maybeExtendPlainSelectionByClick(event)) return;
@@ -3276,7 +3620,8 @@ function autoSizePlainBlock(el: HTMLTextAreaElement) {
   const host = plainLiveHost.value;
   const keep = host ? host.scrollTop : 0;
   el.style.height = 'auto';
-  el.style.height = `${Math.max(plainLineHeightPx(), el.scrollHeight)}px`;
+  const lh = Number.parseFloat(window.getComputedStyle(el).lineHeight) || 24;
+  el.style.height = `${Math.max(lh, el.scrollHeight)}px`;
   if (host && host.scrollTop !== keep) host.scrollTop = keep;
 }
 
@@ -3626,6 +3971,7 @@ const editorCtx = ref<{
   y: number;
   hasSelection: boolean;
   hasImage: boolean;
+  imageDims?: { width: number; height: number; naturalWidth: number; naturalHeight: number } | null;
   spell: EditorMenuSpell | null;
 } | null>(null);
 // #376 — the misspelled word the menu was opened on, for replacing it with a
@@ -3751,7 +4097,20 @@ async function onEditorContextMenu(event: MouseEvent) {
       }
     }
   }
-  editorCtx.value = { x: event.clientX, y: event.clientY, hasSelection, hasImage: !!ctxImage, spell };
+  const imageDims = ctxImage
+    ? (() => {
+        const rect = ctxImage.getBoundingClientRect();
+        const nw = ctxImage.naturalWidth || Math.round(rect.width) || 0;
+        const nh = ctxImage.naturalHeight || Math.round(rect.height) || 0;
+        return {
+          width: Math.round(rect.width) || nw,
+          height: Math.round(rect.height) || nh,
+          naturalWidth: nw,
+          naturalHeight: nh,
+        };
+      })()
+    : null;
+  editorCtx.value = { x: event.clientX, y: event.clientY, hasSelection, hasImage: !!ctxImage, imageDims, spell };
 }
 
 /** Replace the right-clicked misspelling with `word` (#376) — one undoable
@@ -3829,15 +4188,7 @@ async function writeClipboard(text: string) {
   }
 }
 async function readClipboard(): Promise<string> {
-  try {
-    return (await readClipboardTextPlugin()) ?? '';
-  } catch {
-    try {
-      return (await navigator.clipboard?.readText()) ?? '';
-    } catch {
-      return '';
-    }
-  }
+  return await readClipboardTextFallback();
 }
 
 function onEditorMenuResizeImage(size: string) {
@@ -4014,13 +4365,14 @@ function updatePlainBlock(index: number, text: string, caret?: number) {
   // merged view, so offsets stay consistent for this edit.
   const wasSelectAll = plainSelectAll.value;
   plainSelectAll.value = false;
-  // Snapshot the pre-edit document for undo (coalesced) before we mutate it.
-  if (!plainComposing.value) recordPlainHistory();
   let nextCaret = block.start + (caret ?? text.length);
   // Re-attach the block separator that splitPlainMarkdownBlocks stripped from
   // the editable text, so neighbouring blocks don't merge on every edit.
   const tail = block.hasTrailingNewline ? '\n' : '';
   let next = `${plainText.value.slice(0, block.start)}${text}${tail}${plainText.value.slice(block.end)}`;
+  // #512 — Snapshot the pre-edit document for undo only when the edit actually
+  // changes the document content, preventing post-edit duplicate entries.
+  if (!plainComposing.value && next !== plainText.value) recordPlainHistory();
   const repaired = !plainComposing.value && props.tab.language === 'markdown'
     ? repairIndentedFenceEdit(next, Math.max(0, nextCaret - 1), nextCaret, nextCaret)
     : null;
@@ -4071,12 +4423,24 @@ function updatePlainBlock(index: number, text: string, caret?: number) {
   // everything, or type-over a doc that re-splits to one block). Skipping the
   // nextTick would leave focus on <body> and swallow every subsequent
   // keystroke — caught by real-key testing in the Windows VM.
-  if (!wasSelectAll && !repaired && nextIndex === index && nextBlock?.start === block.start && nextBlock?.text === text) {
+  if (
+    !wasSelectAll &&
+    !repaired &&
+    nextIndex === index &&
+    nextBlock?.start === block.start &&
+    nextBlock?.text === text &&
+    plainBlockEditors.value[index]?.value === text &&
+    !plainBlocks.value[nextIndex]?.isTable
+  ) {
     emitPlainCursorAndSelection();
     return;
   }
   nextTick(() => {
     const activeBlock = plainBlocks.value[plainActiveBlock.value];
+    if (activeBlock?.isTable) {
+      activatePlainBlock(plainActiveBlock.value, Math.max(0, nextCaret - activeBlock.start));
+      return;
+    }
     const el = plainBlockEditors.value[plainActiveBlock.value];
     if (!el) return;
     // The active block changed to a different <textarea> (e.g. a re-split moved
@@ -4164,6 +4528,7 @@ function applyTextComputation(v: EditorView, computed: { value: string; caret: n
 
 function listSoftBreakCommand(v: EditorView): boolean {
   if (props.tab.language !== 'markdown' || v.state.readOnly) return false;
+  if (v.composing || v.compositionStarted || isImeComposingActive()) return false;
   if (v.state.selection.ranges.length > 1) return false;
   const sel = v.state.selection.main;
   const res = computeListSoftBreak(v.state.doc.toString(), sel.from, sel.to);
@@ -4173,11 +4538,20 @@ function listSoftBreakCommand(v: EditorView): boolean {
 
 function markdownEnterCommand(v: EditorView): boolean {
   if (props.tab.language !== 'markdown' || v.state.readOnly) return false;
+  if (v.composing || v.compositionStarted || isImeComposingActive()) return false;
   if (v.state.selection.ranges.length > 1) return false;
   const sel = v.state.selection.main;
-  const res = computeListContinuation(v.state.doc.toString(), sel.from, sel.to);
-  if (!res) return false;
-  return applyTextComputation(v, res, 'input.type');
+  const doc = v.state.doc.toString();
+  const res = computeListContinuation(doc, sel.from, sel.to);
+  if (res) return applyTextComputation(v, res, 'input.type');
+  if (isLazyListContinuationLine(doc, sel.from, sel.to)) {
+    return applyTextComputation(
+      v,
+      { value: doc.slice(0, sel.from) + '\n' + doc.slice(sel.to), caret: sel.from + 1 },
+      'input.type',
+    );
+  }
+  return false;
 }
 
 /**
@@ -4326,8 +4700,10 @@ function richExtensionsFor(tab: Tab) {
             enabled: settings.plantumlEnabled,
             server: settings.plantumlServer,
           }),
-          // #353 — "Always show Markdown markers": keep every block's source.
-          keepSource: () => settings.alwaysShowMarkers,
+          // Decoupled from `alwaysShowMarkers`: `collapseBlockSource` controls
+          // whether tables, Mermaid diagrams, and other block widgets render
+          // and fold their source code.
+          keepSource: () => !settings.collapseBlockSource,
           getBoardStrings: () => ({
             loading: t('whiteboard.loading'),
             openFull: t('whiteboard.openFull'),
@@ -4341,7 +4717,10 @@ function richExtensionsFor(tab: Tab) {
           },
         }),
         liveBlocksTheme,
-      ], { showMarkers: settings.alwaysShowMarkers }),
+      ], {
+        showMarkers: settings.alwaysShowMarkers,
+        hideActiveLineMarkers: settings.hideActiveLineMarkers,
+      }),
       ...(settings.alwaysShowMarkers ? [] : [taskListExtension(), wikilinkExtension()]),
     ];
   }
@@ -4352,7 +4731,10 @@ function richExtensionsFor(tab: Tab) {
   }
   return settings.livePreview
     ? [
-        ...livePreviewExtension({ showMarkers: settings.alwaysShowMarkers }),
+        ...livePreviewExtension({
+          showMarkers: settings.alwaysShowMarkers,
+          hideActiveLineMarkers: settings.hideActiveLineMarkers,
+        }),
         ...(settings.alwaysShowMarkers ? [] : [taskListExtension(), wikilinkExtension()]),
       ]
     : richHighlightOnly();
@@ -4405,6 +4787,7 @@ function buildExtensions() {
   return [
     imeCompositionGuard(),
     history(),
+    preservePointerFocusScroll(),
     ...(windowsImeSafeMode
       ? []
       : [
@@ -4415,13 +4798,20 @@ function buildExtensions() {
             drawSelection({ cursorBlinkRate: settings.solidCursor ? 0 : 1200 }),
           ),
           activeLineCompartment.of(activeLineExtension(settings.highlightCurrentLine)),
-          // #90 — column/rectangular selection: hold Alt (Option on macOS) and
-          // drag to select a vertical block. `crosshairCursor` swaps the I-beam
-          // for a crosshair while Alt is held so the user knows the mode is
-          // armed. CM6 already turns multiple selections on by default; no
-          // need to flip `EditorState.allowMultipleSelections`.
+          // #90 / #436 — Multi-cursor & rectangular column selection:
+          // `allowMultipleSelections` defaults to `false` in CM6 (`EditorState`),
+          // so it must be enabled explicitly for `Alt+Click`, `Mod+Click`,
+          // `selectNextOccurrence`, `addCursorAbove`/`Below`, and `Alt+Drag`
+          // column selection to hold multiple cursors.
+          EditorState.allowMultipleSelections.of(true),
+          EditorView.clickAddsSelectionRange.of(
+            (event) =>
+              (event.altKey && !event.shiftKey) ||
+              (usesCommandKey() ? event.metaKey : event.ctrlKey),
+          ),
           rectangularSelection(),
           crosshairCursor(),
+          indentUnit.of('    '),
           indentOnInput(),
           bracketMatching(),
           highlightActiveLine(),
@@ -4499,6 +4889,16 @@ function buildExtensions() {
         ]
       : []),
     foldCompartment.of(foldExtensionFor(settings.foldingEnabled)),
+    pdfPageBreaksCompartment.of(
+      props.tab.language === 'markdown'
+        ? pdfPageBreaksExtension({
+            isEnabled: () => settings.showPdfPageBreaks,
+            getPdfDefaults: () => settings.pdfDefaults,
+            formatLabel: (page, total, size) =>
+              t('settings.pdfPageBreakLabel', { page: String(page), total: String(total), size }),
+          })
+        : [],
+    ),
     sessionRestoreExtension(props.tab.id),
     // #167 — clicks during async widget renders (post tab-switch) must not
     // turn into phantom multi-line selections when the layout shifts.
@@ -4565,6 +4965,7 @@ function buildExtensions() {
       if (u.selectionSet) {
         const head = u.state.selection.main.head;
         const line = u.state.doc.lineAt(head);
+        getCursorHistory().record({ path: props.tab.filePath || props.tab.id, pos: head, line: line.number });
         emit('cursor', line.number, head - line.from + 1);
         // v4.3.0 issue #70: emit selection text so StatusBar can show
         // selected word/char count. Empty string when nothing's selected.
@@ -4675,6 +5076,11 @@ onMounted(() => {
     }),
     parent: host.value,
   });
+  {
+    const initHead = view.state.selection.main.head;
+    const initLine = view.state.doc.lineAt(initHead);
+    getCursorHistory().record({ path: props.tab.filePath || props.tab.id, pos: initHead, line: initLine.number });
+  }
   maybeRestoreSession();
   if (!isMobile()) {
     focusFreshCodeMirror();
@@ -4779,7 +5185,9 @@ function onTransformCase(e: Event) {
  * differ in how they hand those over and write the result back.
  */
 function onFormatMarkdown(e: Event) {
-  let kind = ((e as CustomEvent).detail || {}).kind as FormatKind | 'headingCycle';
+  const detail = (e as CustomEvent).detail || {};
+  let kind = detail.kind as FormatKind | 'headingCycle';
+  const color = typeof detail.color === 'string' ? detail.color : undefined;
   if (props.tab.id !== tabs.activeId) return;
   if (props.tab.language !== 'markdown') return;
   // 5.0 touch keyboard bar: one heading button that steps
@@ -4790,7 +5198,7 @@ function onFormatMarkdown(e: Event) {
     kind = nextHeadingKind(sel.doc, sel.from);
   }
   if (!FORMAT_KINDS.includes(kind)) return;
-  applyFormatKind(kind);
+  applyFormatKind(kind, color);
 }
 
 /** The text and selection the format commands work on, in either editor
@@ -4808,12 +5216,16 @@ function currentFormatSelection(): { doc: string; from: number; to: number } | n
 
 /** Run one `fmt.*` command on this editor — the shortcut, the Insert menu,
  *  the 5.0 selection bubble and the touch keyboard bar all land here. */
-function applyFormatKind(kind: FormatKind) {
+function applyFormatKind(kind: FormatKind, color?: string) {
   if (props.tab.language !== 'markdown') return;
   if (!usePlainWindowsEditor) {
     if (!view) return;
     const sel = view.state.selection.main;
-    const edit = applyFormat(view.state.doc.toString(), sel.from, sel.to, kind);
+    const docStr = view.state.doc.toString();
+    const edit =
+      kind === 'highlight' && color !== undefined
+        ? applyHighlightColor(docStr, sel.from, sel.to, color)
+        : applyFormat(docStr, sel.from, sel.to, kind);
     view.dispatch({
       changes: { from: edit.from, to: edit.to, insert: edit.insert },
       selection: { anchor: edit.selFrom, head: edit.selTo },
@@ -4828,7 +5240,10 @@ function applyFormatKind(kind: FormatKind) {
     ? plainBlockEditors.value[plainActiveBlock.value]
     : plainEditor.value;
   if (!el) return;
-  const edit = applyFormat(el.value, el.selectionStart ?? 0, el.selectionEnd ?? 0, kind);
+  const edit =
+    kind === 'highlight' && color !== undefined
+      ? applyHighlightColor(el.value, el.selectionStart ?? 0, el.selectionEnd ?? 0, color)
+      : applyFormat(el.value, el.selectionStart ?? 0, el.selectionEnd ?? 0, kind);
   const value = el.value.slice(0, edit.from) + edit.insert + el.value.slice(edit.to);
   recordPlainHistory();
   if (plainLiveEnabled.value) {
@@ -5006,6 +5421,29 @@ function onEditorCommand(e: Event) {
   const headingMode = (c: EditorCommand) =>
     c === 'headingPromote' ? 'promote' : c === 'headingDemote' ? 'demote' : 'paragraph';
 
+  if (cmd === 'cursorBack' || cmd === 'cursorForward') {
+    const q = getCursorHistory();
+    const stop = cmd === 'cursorBack' ? q.back() : q.forward();
+    if (!stop) return;
+    q.withNavigation(() => {
+      if (!usePlainWindowsEditor) {
+        if (!view) return;
+        const clamped = Math.max(0, Math.min(stop.pos, view.state.doc.length));
+        view.dispatch({
+          selection: { anchor: clamped, head: clamped },
+          effects: EditorView.scrollIntoView(clamped, { y: 'center' }),
+          userEvent: 'select',
+        });
+        view.focus();
+      } else {
+        const doc = plainLiveEnabled.value ? plainText.value || '' : plainEditor.value?.value ?? plainText.value ?? '';
+        const clamped = Math.max(0, Math.min(stop.pos, doc.length));
+        selectPlainRange(clamped, clamped, true);
+      }
+    });
+    return;
+  }
+
   if (!usePlainWindowsEditor) {
     if (!view) return;
     const v = view;
@@ -5013,6 +5451,14 @@ function onEditorCommand(e: Event) {
     const sel = v.state.selection.main;
     if (cmd === 'jumpToSelection') {
       v.dispatch({ effects: EditorView.scrollIntoView(sel, { y: 'center' }) });
+    } else if (cmd === 'selectNextOccurrence') {
+      selectNextOccurrence(v);
+    } else if (cmd === 'selectAllOccurrences') {
+      selectAllOccurrencesCommand(v);
+    } else if (cmd === 'addCursorAbove') {
+      addCursorAbove(v);
+    } else if (cmd === 'addCursorBelow') {
+      addCursorBelow(v);
     } else if (cmd === 'selectWord' || cmd === 'selectLine') {
       const r = cmd === 'selectWord' ? selectWordRange(doc, sel.from, sel.to) : selectLineRange(doc, sel.from, sel.to);
       if (r) v.dispatch({ selection: { anchor: r.from, head: r.to }, scrollIntoView: true, userEvent: 'select' });
@@ -5044,6 +5490,25 @@ function onEditorCommand(e: Event) {
     selectPlainRange(sel.from, sel.to, true);
     return;
   }
+  if (
+    cmd === 'selectNextOccurrence' ||
+    cmd === 'selectAllOccurrences' ||
+    cmd === 'addCursorAbove' ||
+    cmd === 'addCursorBelow'
+  ) {
+    if (cmd === 'selectNextOccurrence') {
+      if (sel.from === sel.to) {
+        const r = selectWordRange(doc, sel.from, sel.to);
+        if (r) selectPlainRange(r.from, r.to, true);
+      } else {
+        const needle = doc.slice(sel.from, sel.to);
+        let nextIdx = doc.indexOf(needle, sel.to);
+        if (nextIdx < 0) nextIdx = doc.indexOf(needle, 0);
+        if (nextIdx >= 0) selectPlainRange(nextIdx, nextIdx + needle.length, true);
+      }
+    }
+    return;
+  }
   if (cmd === 'selectWord' || cmd === 'selectLine') {
     const r = cmd === 'selectWord' ? selectWordRange(doc, sel.from, sel.to) : selectLineRange(doc, sel.from, sel.to);
     if (r) selectPlainRange(r.from, r.to, true);
@@ -5070,6 +5535,7 @@ function findPanelLabels(): FindPanelLabels {
   return {
     find: t('plainFind.findPlaceholder'),
     replace: t('plainFind.replacePlaceholder'),
+    toggleReplace: t('plainFind.toggleReplace'),
     prev: t('plainFind.prev'),
     next: t('plainFind.next'),
     matchCase: t('plainFind.matchCase'),
@@ -5089,6 +5555,8 @@ function openFind(replace = false): void {
   if (view) {
     const searchEl = view.dom.querySelector<HTMLInputElement>('.cm-search input[name=search]');
     const replaceEl = view.dom.querySelector<HTMLInputElement>('.cm-search input[name=replace]');
+    const replaceRow = view.dom.querySelector<HTMLElement>('.cm-find__row--replace');
+    const isReplaceVisible = !!replaceRow && !replaceRow.hidden;
     const sel = view.state.selection.main;
     const selectedText = sel.empty ? '' : view.state.sliceDoc(sel.from, sel.to);
     const curSearch = getSearchQuery(view.state).search;
@@ -5099,7 +5567,7 @@ function openFind(replace = false): void {
         view.focus();
         return;
       }
-      if (replace && replaceEl && document.activeElement === replaceEl) {
+      if (replace && isReplaceVisible && replaceEl && document.activeElement === replaceEl) {
         closeSearchPanel(view);
         view.focus();
         return;
@@ -5107,13 +5575,13 @@ function openFind(replace = false): void {
     }
     view.focus();
     openSearchPanel(view);
-    // CodeMirror's panel always carries the replace row; "Replace" (Ctrl+H)
-    // only decides which field gets the caret. With nothing to find yet the
-    // find field is the one that needs typing first.
-    if (replace && getSearchQuery(view.state).search) {
-      const field = view.dom.querySelector<HTMLInputElement>('.cm-search input[name=replace]');
-      field?.focus();
-      field?.select();
+    if (replace) {
+      setFindPanelReplaceExpanded(view.dom, true);
+      if (getSearchQuery(view.state).search) {
+        const field = view.dom.querySelector<HTMLInputElement>('.cm-search input[name=replace]');
+        field?.focus();
+        field?.select();
+      }
     }
   }
 }
@@ -5163,6 +5631,139 @@ function openTableAtCursor(): void {
     source: source.slice(from, to),
     apply: (markdown: string) => replaceDocRange(from, to, markdown),
   });
+}
+
+// ── floating table toolbar (TableToolbar.vue) ──────────────────────────────
+const tableToolbarEnabled = computed(
+  () =>
+    !isMobile() &&
+    props.tab.language === 'markdown' &&
+    settings.viewMode !== 'preview' &&
+    settings.viewMode !== 'reading',
+);
+
+function editorTextAndCaret(): { text: string; caret: number } | null {
+  if (usePlainWindowsEditor) return { text: plainText.value || '', caret: plainCaretOffset() };
+  if (!view || view.composing || view.compositionStarted || isImeComposingActive()) return null;
+  return { text: view.state.doc.toString(), caret: view.state.selection.main.head };
+}
+
+function tableToolbarTextarea(): HTMLTextAreaElement | null {
+  if (!usePlainWindowsEditor) return null;
+  return plainLiveEnabled.value ? plainBlockEditors.value[plainActiveBlock.value] : plainEditor.value;
+}
+
+function readTableToolbar(): TableToolbarState | null {
+  const own = usePlainWindowsEditor ? plainHostEl.value : view?.dom ?? null;
+  if (!own || !own.contains(document.activeElement)) return null;
+  const session = getActiveTableCellSession(own);
+  if (session) {
+    const model = session.getCurrentModel();
+    if (!model) return null;
+    return {
+      model,
+      row: session.row,
+      col: session.col,
+      key: `cell:${session.from}:${session.to}:${session.row}:${session.col}`,
+    };
+  }
+  if (!usePlainWindowsEditor && view) {
+    // Fast-bail before materializing `doc.toString()` on every 60fps scroll frame
+    // when the caret's own line isn't even part of a pipe table!
+    const head = view.state.selection.main.head;
+    if (!view.state.doc.lineAt(head).text.includes('|')) return null;
+  }
+  const ed = editorTextAndCaret();
+  if (!ed) return null;
+  const hit = tableAt(ed.text, ed.caret);
+  if (!hit) return null;
+  return { model: hit.model, row: hit.row, col: hit.col, key: `${hit.from}:${hit.to}:${ed.caret}` };
+}
+
+function readTableToolbarRect(): Box | null {
+  const own = usePlainWindowsEditor ? plainHostEl.value : view?.dom ?? null;
+  const session = getActiveTableCellSession(own);
+  if (session) {
+    const r = session.tableEl.getBoundingClientRect();
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+  }
+  if (!usePlainWindowsEditor && view) {
+    // Fast-bail before materializing `doc.toString()` on every 60fps scroll frame
+    // when the caret's own line isn't even part of a pipe table!
+    const head = view.state.selection.main.head;
+    if (!view.state.doc.lineAt(head).text.includes('|')) return null;
+  }
+  const ed = editorTextAndCaret();
+  if (!ed) return null;
+  const hit = tableAt(ed.text, ed.caret);
+  if (!hit) return null;
+  if (!usePlainWindowsEditor) {
+    if (!view) return null;
+    const a = view.coordsAtPos(hit.from, 1);
+    const b = view.coordsAtPos(hit.to, -1);
+    if (!a || !b) return null;
+    return {
+      left: Math.min(a.left, b.left),
+      right: Math.max(a.right, b.right),
+      top: a.top,
+      bottom: b.bottom,
+    };
+  }
+  const el = tableToolbarTextarea();
+  if (!el) return null;
+  const base = plainLiveEnabled.value ? plainBlocks.value[plainActiveBlock.value]?.start ?? 0 : 0;
+  const box = selectionBoxPx(el, el.value, hit.from - base, hit.to - base);
+  const r = el.getBoundingClientRect();
+  const cs = getComputedStyle(el);
+  const ox = r.left + el.clientLeft + parseFloat(cs.paddingLeft || '0') - el.scrollLeft;
+  const oy = r.top + el.clientTop + parseFloat(cs.paddingTop || '0') - el.scrollTop;
+  return { left: box.left + ox, right: box.right + ox, top: box.top + oy, bottom: box.bottom + oy };
+}
+
+function onTableToolbarAction(action: TableAction): void {
+  const own = usePlainWindowsEditor ? plainHostEl.value : view?.dom ?? null;
+  const session = getActiveTableCellSession(own);
+  if (session) {
+    const model = session.getCurrentModel();
+    if (!model) return;
+    const next = applyTableAction(model, action, session.row, session.col);
+    if (next === model) return;
+    const docText = usePlainWindowsEditor ? plainText.value || '' : view?.state.doc.toString() ?? '';
+    const indent = commonIndent(docText.slice(session.from, session.to));
+    const markdown = serializeTable(next)
+      .split('\n')
+      .map((line) => indent + line)
+      .join('\n');
+    const nextRow = rowAfterAction(action, session.row, next);
+    const nextCol = colAfterAction(action, session.col, next);
+    session.cancelCommit();
+    requestTableCellFocus(session.from, nextRow, nextCol);
+    replaceDocRange(
+      session.from,
+      session.to,
+      markdown,
+      session.from + cellStart(markdown, nextRow, nextCol),
+    );
+    return;
+  }
+  if (!usePlainWindowsEditor && view) {
+    const head = view.state.selection.main.head;
+    if (!view.state.doc.lineAt(head).text.includes('|')) return;
+  }
+  const ed = editorTextAndCaret();
+  if (!ed) return;
+  const hit = tableAt(ed.text, ed.caret);
+  if (!hit) return;
+  const next = applyTableAction(hit.model, action, hit.row, hit.col);
+  if (next === hit.model) return;
+  const indent = /^[ \t]*/.exec(ed.text.slice(hit.from, hit.to))?.[0] ?? '';
+  const markdown = serializeTable(next)
+    .split('\n')
+    .map((line) => indent + line)
+    .join('\n');
+  const row = rowAfterAction(action, hit.row, next);
+  const col = colAfterAction(action, hit.col, next);
+  replaceDocRange(hit.from, hit.to, markdown, hit.from + cellStart(markdown, row, col));
 }
 
 /**
@@ -5226,15 +5827,15 @@ function plainCaretOffset(): number {
 }
 
 /** Replace a document range in whichever editor this pane is running. */
-function replaceDocRange(from: number, to: number, text: string): void {
+function replaceDocRange(from: number, to: number, text: string, caret = from + text.length): void {
   if (usePlainWindowsEditor) {
     const src = plainText.value || '';
     recordPlainHistory();
-    applyPlainContent(src.slice(0, from) + text + src.slice(to), from + text.length);
+    applyPlainContent(src.slice(0, from) + text + src.slice(to), caret);
     return;
   }
   if (!view) return;
-  view.dispatch({ changes: { from, to, insert: text } });
+  view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: caret } });
 }
 
 /**
@@ -5361,7 +5962,70 @@ function saveCurrentTabCaret(tabId: string) {
   }
 }
 
+// #377 — Bidirectional hover block highlight in Split View mode.
+let hoveredCmLineEl: HTMLElement | null = null;
+function setHoveredCmLineEl(el: HTMLElement | null) {
+  if (hoveredCmLineEl === el) return;
+  hoveredCmLineEl?.classList.remove('cm-split-hover-line');
+  hoveredCmLineEl = el;
+  hoveredCmLineEl?.classList.add('cm-split-hover-line');
+}
+
+function onSplitHoverFromPreview(e: Event) {
+  const detail = (
+    e as CustomEvent<{ tabId?: string; line: number; source: 'editor' | 'preview' }>
+  ).detail;
+  if (!detail || detail.source === 'editor') return;
+  if (detail.tabId && detail.tabId !== props.tab.id) return;
+  if (settings.viewMode !== 'split' || !detail.line || !view) {
+    setHoveredCmLineEl(null);
+    return;
+  }
+  const lineNo = Math.max(1, Math.min(detail.line, view.state.doc.lines));
+  try {
+    const pos = view.state.doc.line(lineNo).from;
+    const domHit = view.domAtPos(pos);
+    const baseEl =
+      domHit.node instanceof HTMLElement ? domHit.node : domHit.node.parentElement;
+    const lineEl = baseEl?.closest?.('.cm-line') as HTMLElement | null;
+    setHoveredCmLineEl(lineEl ?? null);
+  } catch {
+    setHoveredCmLineEl(null);
+  }
+}
+
+function onEditorHostMouseMove(e: MouseEvent) {
+  if (settings.viewMode !== 'split' || !view) return;
+  const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+  if (pos === null) return;
+  const line = view.state.doc.lineAt(pos).number;
+  window.dispatchEvent(
+    new CustomEvent('solomd:split-hover-line', {
+      detail: { tabId: props.tab.id, line, source: 'editor' },
+    }),
+  );
+}
+
+function onEditorHostMouseLeave() {
+  if (settings.viewMode !== 'split') return;
+  window.dispatchEvent(
+    new CustomEvent('solomd:split-hover-line', {
+      detail: { tabId: props.tab.id, line: 0, source: 'editor' },
+    }),
+  );
+}
+
+onMounted(() => {
+  window.addEventListener('solomd:split-hover-line', onSplitHoverFromPreview);
+  host.value?.addEventListener('mousemove', onEditorHostMouseMove, { passive: true });
+  host.value?.addEventListener('mouseleave', onEditorHostMouseLeave, { passive: true });
+});
+
 onBeforeUnmount(() => {
+  window.removeEventListener('solomd:split-hover-line', onSplitHoverFromPreview);
+  host.value?.removeEventListener('mousemove', onEditorHostMouseMove);
+  host.value?.removeEventListener('mouseleave', onEditorHostMouseLeave);
+  setHoveredCmLineEl(null);
   saveCurrentTabCaret(props.tab.id);
   cancelCmScrollRestore?.();
   cleanupRelayout?.();
@@ -5404,10 +6068,10 @@ onBeforeUnmount(() => {
 // preserves the exact cursor and scroll position.
 
 function focusFreshCodeMirror() {
-  if (isMobile()) return;
+  if (isMobile() && (props.tab.filePath || props.tab.content !== '')) return;
   // After the palette / menu / tab bar click that ran the command has closed,
   // focus the editor without scrolling the viewport to the caret.
-  nextTick(() => {
+  const doFocus = () => {
     if (!view) return;
     const active = document.activeElement;
     const inModalOrSidebarInput =
@@ -5415,11 +6079,11 @@ function focusFreshCodeMirror() {
       !active.closest('.cm-editor') &&
       (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT');
     if (inModalOrSidebarInput) return;
-    const savedSt = view.scrollDOM.scrollTop;
-    view.contentDOM.focus({ preventScroll: true });
-    if (savedSt > 0 && Math.abs(view.scrollDOM.scrollTop - savedSt) > 1) {
-      view.scrollDOM.scrollTop = savedSt;
-    }
+    focusCodeMirrorWithoutScroll(view);
+  };
+  nextTick(() => {
+    doFocus();
+    if (isMobile()) setTimeout(doFocus, 80);
   });
 }
 
@@ -5470,12 +6134,27 @@ function restoreCodeMirrorScroll(saved?: TabCaretSnapshot) {
   let cancelled = false;
   const dom = view.scrollDOM;
   const intentEvents = ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const;
+  // #522 — a note with dozens of diagrams keeps dispatching `cm-relayout`
+  // for ~1s while the shared render queue drains, well past the old fixed
+  // 760ms window. Keep reasserting until relayout goes quiet instead, with
+  // a hard cap so the listener can never outlive the tab.
+  let settleTimer: ReturnType<typeof setTimeout> | null = null;
   const onRelayout = () => {
     requestAnimationFrame(reassert);
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+      settleTimer = null;
+      reassert();
+      stop();
+    }, 300);
   };
   const stop = () => {
     if (cancelled) return;
     cancelled = true;
+    if (settleTimer) {
+      clearTimeout(settleTimer);
+      settleTimer = null;
+    }
     for (const ev of intentEvents) dom.removeEventListener(ev, stop);
     window.removeEventListener('solomd:cm-relayout', onRelayout);
     if (cancelCmScrollRestore === stop) cancelCmScrollRestore = null;
@@ -5491,10 +6170,13 @@ function restoreCodeMirrorScroll(saved?: TabCaretSnapshot) {
   setTimeout(reassert, 60);
   setTimeout(reassert, 160);
   setTimeout(reassert, 400);
+  // Hard cap: if a render stalls (or a widget never settles) the reassert
+  // listener must not live forever. Normal completion happens 300ms after the
+  // last relayout, so this is only a safety net.
   setTimeout(() => {
     reassert();
     stop();
-  }, 760);
+  }, 4000);
 }
 
 // #169 (Windows) — one synchronous scrollTop assignment is not enough on the
@@ -5617,6 +6299,11 @@ watch(
         selection: { anchor: Math.min(saved?.caret ?? 0, props.tab.content.length) },
       })
     );
+    {
+      const initHead = view.state.selection.main.head;
+      const initLine = view.state.doc.lineAt(initHead);
+      getCursorHistory().record({ path: props.tab.filePath || props.tab.id, pos: initHead, line: initLine.number });
+    }
     maybeRestoreSession();
     focusFreshCodeMirror();
     restoreCodeMirrorScroll(saved);
@@ -5643,7 +6330,7 @@ watch(
 );
 
 watch(
-  () => JSON.stringify(settings.keybindings),
+  [() => JSON.stringify(settings.keybindings), () => settings.dailyNotesEnabled],
   () => {
     view?.dispatch({ effects: baseKeymapCompartment.reconfigure(baseKeymap()) });
   },
@@ -5706,6 +6393,7 @@ watch(
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: next },
         selection: { anchor: head },
+        annotations: Transaction.addToHistory.of(false),
         scrollIntoView: false,
       });
       const keep = () => {
@@ -5738,6 +6426,15 @@ watch(
 );
 
 watch(
+  () => settings.vimrc,
+  (rc) => {
+    if (settings.vimMode) {
+      applyVimrcMappings(rc, Vim as any);
+    }
+  }
+);
+
+watch(
   () => settings.wordWrap,
   (w) => {
     view?.dispatch({ effects: wrapCompartment.reconfigure(w ? EditorView.lineWrapping : []) });
@@ -5751,11 +6448,19 @@ watch(
   },
 );
 
-// #353 — markers shown/hidden is baked into the live bundles; swap them.
+// #353 / #303 — markers shown/hidden are baked into the live bundles; swap them.
 watch(
-  () => settings.alwaysShowMarkers,
+  [() => settings.alwaysShowMarkers, () => settings.hideActiveLineMarkers],
   () => {
     view?.dispatch({ effects: richCompartment.reconfigure(richExtensionsFor(props.tab)) });
+  },
+);
+
+watch(
+  () => settings.collapseBlockSource,
+  () => {
+    plainSourceFoldOverrides.value = {};
+    view?.dispatch({ effects: resetBlockFoldOverridesEffect.of(null) });
   },
 );
 
@@ -5775,6 +6480,25 @@ watch(
   (s) => {
     view?.dispatch({ effects: lineNumCompartment.reconfigure(s ? lineNumbers() : []) });
   }
+);
+
+watch(
+  [() => settings.showPdfPageBreaks, () => settings.pdfDefaults, () => settings.language],
+  () => {
+    view?.dispatch({
+      effects: pdfPageBreaksCompartment.reconfigure(
+        props.tab.language === 'markdown'
+          ? pdfPageBreaksExtension({
+              isEnabled: () => settings.showPdfPageBreaks,
+              getPdfDefaults: () => settings.pdfDefaults,
+              formatLabel: (page, total, size) =>
+                t('settings.pdfPageBreakLabel', { page: String(page), total: String(total), size }),
+            })
+          : [],
+      ),
+    });
+  },
+  { deep: true },
 );
 
 watch(
@@ -5843,11 +6567,15 @@ watch(
       void processPlainLiveRenderedBlocks();
     }
     if (oldMode === 'preview' || oldMode === 'reading') {
-      if (usePlainWindowsEditor) {
-        focusPlainEditor(true);
-      } else {
-        focusFreshCodeMirror();
-      }
+      const refocus = () => {
+        if (usePlainWindowsEditor) {
+          focusPlainEditor(true);
+        } else {
+          focusFreshCodeMirror();
+        }
+      };
+      refocus();
+      setTimeout(refocus, 120);
     }
   },
   { flush: 'sync' },
@@ -5863,12 +6591,33 @@ watch(plainLiveEnabled, () => {
 watch(
   // renderDepsVersion: the blocks re-render when KaTeX / highlight.js land,
   // which puts mermaid / PlantUML fences back to source — process them again.
-  () => [plainLiveEnabled.value, plainText.value, plainActiveBlock.value, settings.theme, settings.language, renderDepsVersion.value],
+  () => [plainLiveEnabled.value, settings.theme, settings.language, renderDepsVersion.value],
   () => {
-    // No mermaid.initialize here any more: the render pass configures it with
-    // the current theme itself, and doing it here would load the renderer for
-    // a document that has no diagrams.
     void processPlainLiveRenderedBlocks();
+  },
+  { flush: 'post' },
+);
+
+watch(
+  plainText,
+  () => {
+    if (!plainLiveEnabled.value) return;
+    // When typing inside a block, only the active block's live preview can
+    // change — avoid running 5 full-document `querySelectorAll` sweeps on every keystroke!
+    void processPlainLiveRenderedBlocks(plainActiveBlock.value);
+  },
+  { flush: 'post' },
+);
+
+watch(
+  plainActiveBlock,
+  (_nextIdx, oldIdx) => {
+    // Only the block we just stepped OUT of transitioned from <textarea> back to
+    // rendered HTML — scope DOM post-processing strictly to `oldIdx` instead of
+    // walking thousands of unchanged blocks on every search jump!
+    if (typeof oldIdx === 'number' && oldIdx >= 0) {
+      void processPlainLiveRenderedBlocks(oldIdx);
+    }
   },
   { flush: 'post' },
 );
@@ -6057,14 +6806,14 @@ function getViewLine(): number | null {
             const idx = Number(node.getAttribute('data-plain-block-index') || '0');
             const b = blocks[idx];
             if (b) {
-              return plainText.value.slice(0, b.start).split('\n').length;
+              return b.startLine;
             }
           }
         }
       }
       const block = blocks[plainActiveBlock.value];
       if (!block) return 1;
-      return plainText.value.slice(0, block.start).split('\n').length;
+      return block.startLine;
     }
     const el = plainEditor.value;
     if (!el) return null;
@@ -6165,6 +6914,12 @@ function insertMarkdown(snippet: string): void {
     return;
   }
   if (!view) return;
+  const session = getActiveTableCellSession(view.dom);
+  if (session && snippet.includes('\n')) {
+    session.cancelCommit();
+    const afterTable = Math.min(view.state.doc.length, session.to);
+    view.dispatch({ selection: { anchor: afterTable } });
+  }
   const parsed = parseInsertSnippet(snippet);
   const sel = view.state.selection.main;
   const selected = sel.from === sel.to ? '' : view.state.doc.sliceString(sel.from, sel.to);
@@ -6177,6 +6932,15 @@ function insertMarkdown(snippet: string): void {
   const base = sel.from + (!calloutBody && needsLeadingBreak ? 1 : 0);
   const anchor = calloutBody ? insertText.length : parsed.anchor;
   const head = calloutBody ? insertText.length : parsed.head;
+  const trimmed = insertText.replace(/^\n+/, '');
+  if (
+    settings.viewMode === 'liveEdit' &&
+    settings.collapseBlockSource &&
+    parseTable(trimmed.trim()) !== null
+  ) {
+    const leadingNewlines = insertText.length - trimmed.length;
+    requestTableCellFocus(sel.from + leadingNewlines, HEADER_ROW, 0);
+  }
   view.dispatch({
     changes: { from: sel.from, to: sel.to, insert: insertText },
     selection: { anchor: base + anchor, head: base + head },
@@ -6205,9 +6969,8 @@ function getViewportAnchor(): { line: number; offsetTop: number } | null {
           const subLines = el ? el.value.slice(0, el.selectionStart ?? 0).split('\n').length - 1 : 0;
           const caretOffsetTop = blockRect.top - hostRect.top + subLines * plainLineHeightPx();
           if (caretOffsetTop >= -4 && caretOffsetTop <= hostEl.clientHeight - 12) {
-            const blockStartLine = plainText.value.slice(0, activeBlock.start).split('\n').length;
             return {
-              line: blockStartLine + subLines,
+              line: activeBlock.startLine + subLines,
               offsetTop: Math.max(0, Math.round(caretOffsetTop)),
             };
           }
@@ -6220,7 +6983,7 @@ function getViewportAnchor(): { line: number; offsetTop: number } | null {
             const b = blocks[bIdx];
             if (b) {
               return {
-                line: plainText.value.slice(0, b.start).split('\n').length,
+                line: b.startLine,
                 offsetTop: Math.max(0, Math.round(rect.top - hostRect.top)),
               };
             }
@@ -6328,7 +7091,31 @@ function scrollToLineAtOffset(line: number, offsetTop = 8): void {
   view.scrollDOM.scrollTop = Math.max(0, view.scrollDOM.scrollTop + (y - scroller.top) - safeOffset);
 }
 
-defineExpose({ gotoLine, setCaret, insertImageFromPath, insertImageUrl, uploadLocalImages, getViewLine, getViewportAnchor, restoreSavedScroll, scrollToLine, scrollToLineAtOffset, lineTopY, insertMarkdown, openFind, applyFold, openTableAtCursor, openFormulaAtCursor });
+/** #377 — Resolve 1-indexed document line under viewport coordinates (x, y). */
+function lineAtCoords(x: number, y: number): number | null {
+  if (!view) return null;
+  const pos = view.posAtCoords({ x, y }, false);
+  if (pos == null) return null;
+  return view.state.doc.lineAt(pos).number;
+}
+
+/** #377 — Compute visual band `{ top, height }` relative to the editor host for a 1-indexed line range. */
+function lineBandRect(fromLine: number, toLine = fromLine): { top: number; height: number } | null {
+  if (!view || !host.value) return null;
+  const maxLine = view.state.doc.lines;
+  if (maxLine < 1) return null;
+  const l1 = Math.max(1, Math.min(Math.floor(fromLine), maxLine));
+  const l2 = Math.max(l1, Math.min(Math.floor(toLine), maxLine));
+  const b1 = view.lineBlockAt(view.state.doc.line(l1).from);
+  const b2 = view.lineBlockAt(view.state.doc.line(l2).from);
+  const hostRect = host.value.getBoundingClientRect();
+  const top = view.documentTop + b1.top - hostRect.top;
+  const height = Math.max(b1.height, b2.top + b2.height - b1.top);
+  if (top + height < 0 || top > hostRect.height) return null;
+  return { top, height };
+}
+
+defineExpose({ gotoLine, setCaret, insertImageFromPath, insertImageUrl, uploadLocalImages, getViewLine, getViewportAnchor, restoreSavedScroll, scrollToLine, scrollToLineAtOffset, lineTopY, lineAtCoords, lineBandRect, insertMarkdown, openFind, applyFold, openTableAtCursor, openFormulaAtCursor });
 
 const cls = computed(() => ({
   'cm-host': true,
@@ -6368,6 +7155,7 @@ const cls = computed(() => ({
         'plain-block-editor',
         {
           'plain-block-editor--cb-numbers': settings.codeBlockLineNumbers,
+          'plain-block-editor--line-numbers': settings.showLineNumbers,
           'plain-block-editor--focus': plainFocusMode,
           'plain-block-editor--hl-line': settings.highlightCurrentLine,
         },
@@ -6377,16 +7165,46 @@ const cls = computed(() => ({
     >
       <div
         v-for="(block, index) in plainBlocks"
+        v-memo="[
+          block,
+          index === plainActiveBlock,
+          plainBlockHidden(block, index),
+          plainHeadingFolded(block),
+          index === plainActiveBlock ? plainFindBoxes : null,
+          settings.showLineNumbers,
+          settings.wordWrap,
+          props.spellCheck,
+          plainSolidCaretOn,
+        ]"
         v-show="!plainBlockHidden(block, index)"
         :key="block.id"
         :data-plain-block-index="index"
         class="plain-block"
-        :class="{
-          'plain-block--active': index === plainActiveBlock,
-          'plain-block--heading': !!plainHeadingFor(block),
-        }"
+        :class="[
+          {
+            'plain-block--active': index === plainActiveBlock,
+            'plain-block--heading': !!plainHeadingFor(block),
+            'plain-block--table': !!block.isTableBlock,
+            'plain-block--mermaid': !!block.isMermaid,
+          },
+          block.headingLevel ? `plain-block--h${block.headingLevel}` : '',
+        ]"
         @click="(event) => activatePlainBlockFromClick(index, event)"
       >
+        <div
+          v-if="settings.showLineNumbers"
+          class="plain-block__lineno"
+          aria-hidden="true"
+        >
+          <template v-if="index === plainActiveBlock && !block.sourceCollapsed && block.lineCount > 1">
+            <span
+              v-for="n in block.lineCount"
+              :key="n"
+              class="plain-block__lineno-item"
+            >{{ block.startLine + n - 1 }}</span>
+          </template>
+          <span v-else class="plain-block__lineno-item">{{ block.startLine }}</span>
+        </div>
         <button
           v-if="plainHeadingFor(block)"
           class="plain-fold-toggle"
@@ -6400,8 +7218,22 @@ const cls = computed(() => ({
           class="plain-fold-count"
           @click.stop="togglePlainFold(block)"
         >{{ t('fold.placeholder', { lines: plainHiddenLineCount(block) }) }}</span>
+        <button
+          v-if="block.isTableBlock || block.isMermaid"
+          type="button"
+          class="plain-block-source-btn"
+          :class="{ 'is-expanded': !block.sourceCollapsed }"
+          :title="block.sourceCollapsed ? '展开源码' : '折叠源码'"
+          @mousedown.stop.prevent
+          @click.stop="togglePlainBlockSourceFold(block, index)"
+        >{{ block.sourceCollapsed ? '</> 源码' : '− 折叠源码' }}</button>
+        <div
+          v-if="block.isImageBlock && index !== plainActiveBlock"
+          class="plain-block__image-source"
+        >{{ block.text }}</div>
         <textarea
-          v-if="index === plainActiveBlock"
+          v-if="index === plainActiveBlock && !block.sourceCollapsed"
+          rows="1"
           :ref="(el) => setPlainBlockEditor(index, el as HTMLTextAreaElement | null)"
           class="plain-block__textarea"
           :class="{
@@ -6424,8 +7256,14 @@ const cls = computed(() => ({
           @focus="emitPlainCursorAndSelection"
         ></textarea>
         <div
-          v-else
+          v-if="index !== plainActiveBlock || block.isTableBlock || block.isMermaid || block.isImageBlock"
           class="plain-block__render"
+          :class="{
+            'plain-block__render--table': block.isTable,
+            'plain-block__render--mermaid-below': index === plainActiveBlock && !block.sourceCollapsed && (block.isMermaid || block.isTableBlock),
+            'plain-block__render--image-below': block.isImageBlock && index === plainActiveBlock,
+          }"
+          :data-table-block-index="block.isTable ? index : undefined"
           v-html="block.html"
         ></div>
         <!-- #330 — the current find match, drawn: the textarea paints no
@@ -6541,6 +7379,13 @@ const cls = computed(() => ({
       @keydown.esc.prevent.stop="closePlainFind(true)"
     >
       <div class="plain-find__row">
+        <button
+          class="plain-find__btn"
+          :title="t('plainFind.toggleReplace')"
+          :aria-label="t('plainFind.toggleReplace')"
+          :aria-expanded="plainReplaceOpen"
+          @click="plainReplaceOpen = !plainReplaceOpen"
+        >{{ plainReplaceOpen ? '▾' : '▸' }}</button>
         <!-- Enter / Shift+Enter step through matches and keep focus here;
              Esc hands the editor the current match (#330). -->
         <input
@@ -6563,7 +7408,7 @@ const cls = computed(() => ({
         >Aa</button>
         <button class="plain-find__btn" :title="t('plainFind.close')" :aria-label="t('plainFind.close')" @click="closePlainFind(true)">✕</button>
       </div>
-      <div class="plain-find__row">
+      <div v-show="plainReplaceOpen" class="plain-find__row" style="padding-left: 30px;">
         <input
           ref="plainReplaceInput"
           class="plain-find__input"
@@ -6604,6 +7449,13 @@ const cls = computed(() => ({
     :rect="readBubbleRect"
     @format="applyFormatKind"
   />
+  <TableToolbar
+    :host="bubbleHost"
+    :enabled="tableToolbarEnabled"
+    :read="readTableToolbar"
+    :rect="readTableToolbarRect"
+    @action="onTableToolbarAction"
+  />
   <Teleport to="body">
     <EditorContextMenu
       v-if="editorCtx"
@@ -6611,6 +7463,7 @@ const cls = computed(() => ({
       :y="editorCtx.y"
       :has-selection="editorCtx.hasSelection"
       :has-image="editorCtx.hasImage"
+      :image-dims="editorCtx.imageDims"
       :spell="editorCtx.spell"
       @action="onEditorMenuAction"
       @resize-image="onEditorMenuResizeImage"
@@ -6867,6 +7720,33 @@ const cls = computed(() => ({
   font-size: var(--plain-editor-font-size, 16px);
   line-height: 1.8;
 }
+.plain-block-editor--line-numbers {
+  padding-left: 56px;
+}
+.plain-block__lineno {
+  position: absolute;
+  left: -48px;
+  top: 1px;
+  width: 34px;
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+  color: var(--text-faint, #999);
+  font-family: var(--plain-editor-font-family, var(--font-editor, var(--font-ui)));
+  font-size: var(--plain-editor-font-size, 16px);
+  line-height: 1.8;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  pointer-events: none;
+}
+.plain-block--h1 .plain-block__lineno,
+.plain-block--h2 .plain-block__lineno,
+.plain-block--h3 .plain-block__lineno,
+.plain-block--h4 .plain-block__lineno,
+.plain-block--h5 .plain-block__lineno,
+.plain-block--h6 .plain-block__lineno {
+  top: 1.15em;
+}
 .plain-block {
   position: relative;
   min-height: 1.8em;
@@ -6878,12 +7758,12 @@ const cls = computed(() => ({
 /* #467 / #486 — active editing line/block tint in non-dark and dark modes. */
 .plain-block-editor--hl-line .plain-block--active,
 .plain-block-editor--hl-line .plain-block--active .plain-block__textarea {
-  background: color-mix(in srgb, #f48fb1 22%, color-mix(in srgb, var(--accent) 8%, var(--bg)));
+  background: var(--active-line-bg, color-mix(in srgb, #f48fb1 24%, color-mix(in srgb, var(--accent) 10%, var(--bg))));
   border-radius: 3px;
 }
 .cm-host--dark.plain-block-editor--hl-line .plain-block--active,
 .cm-host--dark.plain-block-editor--hl-line .plain-block--active .plain-block__textarea {
-  background: color-mix(in srgb, #f48fb1 14%, color-mix(in srgb, var(--accent) 11%, var(--bg)));
+  background: var(--active-line-bg, color-mix(in srgb, #f48fb1 16%, color-mix(in srgb, var(--accent) 14%, var(--bg))));
   border-radius: 3px;
 }
 /* #316 — focus mode in the block live editor: one element per paragraph
@@ -6957,6 +7837,28 @@ const cls = computed(() => ({
   tab-size: 2;
   white-space: pre;
 }
+/* #561 — the source line of a standalone image block, shown while the block
+   is NOT being edited. It mirrors `.plain-block__textarea`'s box exactly
+   (same padding, font, line pitch, white-space) so swapping it for the
+   textarea on click changes nothing about the block's height. */
+.plain-block__image-source {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  color: var(--text-3, var(--text-2));
+  font: inherit;
+  line-height: 1.8;
+  white-space: pre;
+  overflow: hidden;
+  cursor: text;
+}
+/* The picture itself stays below the source line while editing, so it never
+   disappears under the caret. */
+.plain-block__render--image-below {
+  margin-top: 0.25em;
+}
 .plain-block__textarea.plain-textarea--wrap {
   white-space: pre-wrap;
   overflow-wrap: break-word;
@@ -6986,32 +7888,71 @@ const cls = computed(() => ({
 .plain-block__render :deep(h3),
 .plain-block__render :deep(h4),
 .plain-block__render :deep(h5),
-.plain-block__render :deep(h6) {
+.plain-block__render :deep(h6),
+.plain-block--h1 .plain-block__textarea,
+.plain-block--h2 .plain-block__textarea,
+.plain-block--h3 .plain-block__textarea,
+.plain-block--h4 .plain-block__textarea,
+.plain-block--h5 .plain-block__textarea,
+.plain-block--h6 .plain-block__textarea {
   font-weight: 600;
   line-height: 1.25;
+  min-height: 1.25em;
   margin: 1.1em 0 0.45em;
 }
 /* 5.0 §2 type scale, in em of the body (30 / 20 / 17 at 16px) so a user's
    font size still scales the whole page. Same values as Preview.vue and the
    CodeMirror live view (lib/cm-live-render.ts). */
-.plain-block__render :deep(h1) {
+.plain-block__render :deep(h1),
+.plain-block--h1 .plain-block__textarea {
   font-size: 1.875em;
   font-weight: 650;
   letter-spacing: -0.015em;
 }
-.plain-block__render :deep(h2) {
+.plain-block__render :deep(h2),
+.plain-block--h2 .plain-block__textarea {
   font-size: 1.25em;
   font-weight: 620;
 }
-.plain-block__render :deep(h3) {
+.plain-block__render :deep(h3),
+.plain-block--h3 .plain-block__textarea {
   font-size: 1.125em;
 }
-.plain-block__render :deep(h4) {
+.plain-block__render :deep(h4),
+.plain-block--h4 .plain-block__textarea {
   font-size: 1.0625em;
 }
 .plain-block__render :deep(h5),
-.plain-block__render :deep(h6) {
+.plain-block__render :deep(h6),
+.plain-block--h5 .plain-block__textarea,
+.plain-block--h6 .plain-block__textarea {
   font-size: 1em;
+}
+.plain-block-source-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-elev) 90%, transparent);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.3;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+  z-index: 3;
+}
+.plain-block:hover .plain-block-source-btn,
+.plain-block-source-btn.is-expanded,
+.plain-block-source-btn:focus-visible {
+  opacity: 1;
+}
+.plain-block-source-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 .plain-block__render :deep(p),
 .plain-block__render :deep(ul),
@@ -7020,7 +7961,7 @@ const cls = computed(() => ({
 .plain-block__render :deep(pre),
 .plain-block__render :deep(table) {
   margin-top: 0;
-  margin-bottom: 0.8em;
+  margin-bottom: 0;
 }
 .plain-block__render :deep(ul),
 .plain-block__render :deep(ol) {
@@ -7126,9 +8067,32 @@ const cls = computed(() => ({
 .plain-block__render :deep(blockquote > :last-child) {
   margin-bottom: 0;
 }
+.plain-block__render :deep(.plain-md-marker) {
+  color: var(--text-faint, #888);
+  font-weight: 500;
+  white-space: pre;
+}
+.plain-block__render:has(> .plain-block__markers) {
+  padding: 0;
+}
+.plain-block__render :deep(.plain-block__markers) {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  margin: 0;
+  padding: 0;
+}
+.plain-block__render :deep(h1.plain-block__markers),
+.plain-block__render :deep(h2.plain-block__markers),
+.plain-block__render :deep(h3.plain-block__markers),
+.plain-block__render :deep(h4.plain-block__markers),
+.plain-block__render :deep(h5.plain-block__markers),
+.plain-block__render :deep(h6.plain-block__markers) {
+  margin: 1.1em 0 0.45em;
+}
 .plain-block__render :deep(ul),
 .plain-block__render :deep(ol) {
-  padding-left: 1.6em;
+  padding-left: 1.15em;
 }
 .plain-block__render :deep(li::marker) {
   color: var(--text-3);
@@ -7141,10 +8105,26 @@ const cls = computed(() => ({
 .plain-block__render :deep(td) {
   border: 1px solid var(--border);
   padding: 6px 12px;
+  min-width: 48px;
+}
+.plain-block__render :deep(th::after),
+.plain-block__render :deep(td::after) {
+  content: '\00a0';
+  display: inline-block;
+  width: 0;
+  overflow: hidden;
+  visibility: hidden;
 }
 .plain-block__render :deep(thead th) {
   background: var(--bg-elev);
   font-weight: 600;
+}
+.plain-block__render :deep(.cm-live-table__cell--editing) {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--bg);
+  white-space: pre-wrap;
+  cursor: text;
 }
 .plain-block__render :deep(hr) {
   border: none;
@@ -7165,6 +8145,10 @@ const cls = computed(() => ({
   padding: 0.5em 0;
   margin: 0.5em 0;
   text-align: center;
+}
+.plain-block__render :deep(.katex:not(.katex-display .katex):has(.mfrac)) {
+  display: inline-block;
+  margin: 0.2em 0;
 }
 .plain-block__render :deep(.plain-mermaid-block),
 .plain-block__render :deep(.plain-plantuml-block),
@@ -7190,5 +8174,40 @@ const cls = computed(() => ({
 .plain-block__render :deep(.plain-block__broken) {
   color: var(--danger);
   white-space: pre-wrap;
+}
+:deep(.cm-split-hover-line) {
+  background: color-mix(in srgb, var(--accent-soft) 35%, transparent) !important;
+  border-radius: 3px;
+}
+:deep(.cm-pdf-page-break) {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin: 10px 0 6px;
+  padding: 2px 0;
+  pointer-events: none;
+  user-select: none;
+}
+:deep(.cm-pdf-page-break::before) {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border));
+  opacity: 0.85;
+}
+:deep(.cm-pdf-page-break__badge) {
+  position: relative;
+  z-index: 1;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-3);
+  background: var(--bg);
+  border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--border));
 }
 </style>

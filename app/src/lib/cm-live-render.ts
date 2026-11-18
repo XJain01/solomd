@@ -65,10 +65,12 @@ import { isDragging, isDragEndTransaction } from './cm-drag-aware';
 import {
   findInlineHtmlSpans,
   findMarkSpans,
+  findSupSubSpans,
   maskInlineCode,
   type LiveInlineHtmlKind,
 } from './html-live-render';
 import { copyPlainText, dedentFenced, dedentIndented } from './code-copy';
+import { isStandaloneImageLine } from './md-image-url';
 
 // ---------------------------------------------------------------------------
 // Marker nodes that we hide off-line. Brackets/parens for links and
@@ -107,13 +109,24 @@ const htmlSubMark = Decoration.mark({ class: 'cm-md-html-sub' });
 const htmlSupMark = Decoration.mark({ class: 'cm-md-html-sup' });
 const htmlKbdMark = Decoration.mark({ class: 'cm-md-html-kbd' });
 
-function inlineHtmlMark(kind: LiveInlineHtmlKind): Decoration {
+function inlineHtmlMark(kind: LiveInlineHtmlKind, bgColor?: string, textColor?: string): Decoration {
   switch (kind) {
     case 'strong': return strongMark;
     case 'em': return emMark;
     case 'underline': return htmlUnderlineMark;
     case 'strike': return strikeMark;
-    case 'mark': return htmlMarkMark;
+    case 'mark': {
+      if (bgColor || textColor) {
+        const styles: string[] = [];
+        if (bgColor) styles.push(`background-color: ${bgColor}`);
+        if (textColor) styles.push(`color: ${textColor}`);
+        return Decoration.mark({
+          class: 'cm-md-html-mark',
+          attributes: { style: styles.join('; ') },
+        });
+      }
+      return htmlMarkMark;
+    }
     case 'sub': return htmlSubMark;
     case 'sup': return htmlSupMark;
     case 'code': return codeMark;
@@ -153,15 +166,31 @@ const markerMark = Decoration.mark({ class: 'cm-md-marker' });
 // the liveEdit theme (here) and the edit-mode livePreview extension
 // (cm-live-preview.ts), which reuses these via the exports below.
 class BulletWidget extends WidgetType {
-  eq() {
-    return true;
+  readonly widthEm: number;
+  readonly leadSpaces: number;
+  constructor(
+    widthEm: number = 0,
+    leadSpaces: number = 0,
+  ) {
+    super();
+    this.widthEm = widthEm;
+    this.leadSpaces = leadSpaces;
+  }
+  eq(other: BulletWidget) {
+    return this.widthEm === other.widthEm && this.leadSpaces === other.leadSpaces;
   }
   toDOM() {
     const span = document.createElement('span');
-    span.className = 'cm-md-bullet';
-    span.textContent = '•';
+    span.className = this.widthEm > 0 ? 'cm-md-bullet cm-md-list-prefix' : 'cm-md-bullet';
+    span.textContent = this.widthEm > 0 ? `${' '.repeat(this.leadSpaces)}• ` : '•';
     span.style.color = 'var(--md-list)';
     span.style.fontWeight = '700';
+    if (this.widthEm > 0) {
+      span.style.display = 'inline-block';
+      span.style.width = `${this.widthEm.toFixed(2)}em`;
+      span.style.textIndent = '0';
+      span.style.whiteSpace = 'pre';
+    }
     span.setAttribute('aria-hidden', 'true');
     return span;
   }
@@ -245,12 +274,30 @@ export function setLiveEditCopyLabel(getter: () => string): void {
 }
 
 class CodeCopyWidget extends WidgetType {
-  constructor(readonly code: string) {
+  readonly doc: { line(n: number): { text: string } };
+  readonly isFenced: boolean;
+  readonly startLine: number;
+  readonly endLine: number;
+  constructor(
+    doc: { line(n: number): { text: string } },
+    isFenced: boolean,
+    startLine: number,
+    endLine: number,
+  ) {
     super();
+    this.doc = doc;
+    this.isFenced = isFenced;
+    this.startLine = startLine;
+    this.endLine = endLine;
   }
 
   eq(other: CodeCopyWidget) {
-    return other.code === this.code;
+    return (
+      other.doc === this.doc &&
+      other.isFenced === this.isFenced &&
+      other.startLine === this.startLine &&
+      other.endLine === this.endLine
+    );
   }
 
   toDOM() {
@@ -273,7 +320,13 @@ class CodeCopyWidget extends WidgetType {
       ev.preventDefault();
       ev.stopPropagation();
       try {
-        await copyPlainText(this.code);
+        const code = codeBlockClipboardText(
+          this.doc,
+          this.isFenced,
+          this.startLine,
+          this.endLine,
+        );
+        await copyPlainText(code);
         btn.textContent = '✓';
         window.setTimeout(() => {
           if (btn.isConnected) btn.textContent = copyLabelGetter();
@@ -334,12 +387,34 @@ const HEADING_LEVELS: Record<string, number> = {
   SetextHeading1: 1, SetextHeading2: 2,
 };
 
-function buildDecorations(view: EditorView, showMarkers = false): DecorationSet {
+function frontMatterEndPos(doc: { lines: number; line: (n: number) => { text: string; to: number } }): number {
+  if (doc.lines < 2) return 0;
+  const first = doc.line(1).text.replace(/^\uFEFF/, '').trim();
+  if (first !== '---') return 0;
+  const maxLines = Math.min(doc.lines, 100);
+  for (let n = 2; n <= maxLines; n += 1) {
+    const t = doc.line(n).text.trim();
+    if (t === '---' || t === '...') {
+      return doc.line(n).to;
+    }
+  }
+  return 0;
+}
+
+export function buildDecorations(
+  view: EditorView,
+  showMarkers = false,
+  hideActiveLineMarkers = false,
+): DecorationSet {
   const sel = view.state.selection.main;
   const dragging = isDragging(view.state);
-  const fromLine = dragging ? -1 : view.state.doc.lineAt(sel.from).number;
-  const toLine = dragging ? -1 : view.state.doc.lineAt(sel.to).number;
+  const suppressCaretReveal = dragging || (hideActiveLineMarkers && sel.empty);
+  const realFromLine = dragging ? -1 : view.state.doc.lineAt(sel.from).number;
+  const realToLine = dragging ? -1 : view.state.doc.lineAt(sel.to).number;
+  const fromLine = suppressCaretReveal ? -1 : realFromLine;
+  const toLine = suppressCaretReveal ? -1 : realToLine;
   const tree = syntaxTree(view.state);
+  const fmEnd = frontMatterEndPos(view.state.doc);
 
   // We collect into a flat list of `Range<Decoration>` and then call
   // `Decoration.set(ranges, /* sort */ true)` — that's the documented
@@ -354,8 +429,13 @@ function buildDecorations(view: EditorView, showMarkers = false): DecorationSet 
   const seenHeadingLines = new Set<number>();
   const seenListLines = new Set<number>();
   const seenInlineHtmlLines = new Set<number>();
+  const seenDefLines = new Set<number>();
 
   for (const { from, to } of view.visibleRanges) {
+    const firstVisibleLine = view.state.doc.lineAt(from).number;
+    const lastVisibleLine = view.state.doc.lineAt(
+      Math.min(to, view.state.doc.length),
+    ).number;
     tree.iterate({
       from,
       to,
@@ -363,25 +443,47 @@ function buildDecorations(view: EditorView, showMarkers = false): DecorationSet 
         const name = node.name;
         const nFrom = node.from;
         const nTo = node.to;
+        // Do not misparse leading YAML front-matter (`---\ninbox: true\n---`)
+        // as a HorizontalRule (<hr>) on line 1 + a SetextHeading2 on the
+        // closing `---` (which hid the opening `---` and left `inbox: true\n---`
+        // exposed as an H2 heading).
+        if (fmEnd > 0 && nFrom < fmEnd && name !== 'Document') {
+          return false;
+        }
         const lineAtNode = view.state.doc.lineAt(nFrom).number;
         const lineEndAtNode = view.state.doc.lineAt(
           Math.min(nTo, view.state.doc.length),
         ).number;
         const caretTouches = lineEndAtNode >= fromLine && lineAtNode <= toLine;
+        const realCaretTouches = lineEndAtNode >= realFromLine && lineAtNode <= realToLine;
+        const nodeLineText =
+          lineAtNode === lineEndAtNode ? view.state.doc.line(lineAtNode).text : '';
+        // #561 — Standalone image lines always keep their Markdown source line
+        // visible above the rendered ImageWidget so entering/leaving the line
+        // never shifts layout. Keep their markers dimmed (never hidden).
+        const onStandaloneImage =
+          nodeLineText !== '' && isStandaloneImageLine(nodeLineText);
 
-        // #506 — When `showMarkers` is off and the caret is off this line,
-        // `liveBlocksExtension` replaces the entire `Image` range with an
-        // `ImageWidget`. Skip emitting overlapping `hideDeco` replacements on
-        // the `![`, `]`, `(`, `URL`, `)` child nodes inside `Image`.
-        if (name === 'Image' && !showMarkers && !caretTouches) {
+        // #506 — When `showMarkers` is off and the caret is off a non-standalone
+        // line (e.g. `- ![alt](url)`), `liveBlocksExtension` replaces the inline
+        // `Image` range with an `ImageWidget`. Skip emitting overlapping
+        // `hideDeco` replacements on child nodes inside that inline `Image`.
+        if (name === 'Image' && !onStandaloneImage && !showMarkers && !realCaretTouches) {
           return false;
         }
 
         // ---- Marker hiding (off-line only) ----
         if (HIDDEN_MARK_NODES.has(name)) {
-          if (showMarkers) {
+          // #530 — Keep ` ```mermaid ` visible on the opening fence line next
+          // to the `+`/`−` fold toggle button even when `showMarkers` is off.
+          const isMermaidHeaderMark =
+            (name === 'CodeMark' || name === 'CodeInfo') &&
+            /^\s*(`{3,}|~{3,})\s*mermaid\s*$/i.test(
+              view.state.doc.lineAt(nFrom).text,
+            );
+          if (showMarkers || isMermaidHeaderMark || onStandaloneImage) {
             // Dimmed, never removed — so the line looks the same whether or
-            // not the caret is on it (#353).
+            // not the caret is on it (#353 / #530 / #561).
             if (nTo > nFrom) ranges.push(markerMark.range(nFrom, nTo));
             return;
           }
@@ -421,7 +523,7 @@ function buildDecorations(view: EditorView, showMarkers = false): DecorationSet 
             previous?.name === 'LinkMark' &&
             view.state.doc.sliceString(previous.from, previous.to) === '(';
           if (inLabeledLink) {
-            if (!showMarkers && !caretTouches && nTo > nFrom) {
+            if (!showMarkers && !onStandaloneImage && !caretTouches && nTo > nFrom) {
               ranges.push(hideDeco.range(nFrom, nTo));
             } else if (nTo > nFrom) {
               ranges.push(markerMark.range(nFrom, nTo));
@@ -480,7 +582,9 @@ function buildDecorations(view: EditorView, showMarkers = false): DecorationSet 
           const endLine = view.state.doc.lineAt(
             Math.min(nTo, view.state.doc.length),
           ).number;
-          for (let ln = startLine; ln <= endLine; ln++) {
+          const loopStart = Math.max(startLine, firstVisibleLine);
+          const loopEnd = Math.min(endLine, lastVisibleLine);
+          for (let ln = loopStart; ln <= loopEnd; ln++) {
             const lineObj = view.state.doc.line(ln);
             if (!seenQuoteLines.has(lineObj.from)) {
               seenQuoteLines.add(lineObj.from);
@@ -500,6 +604,16 @@ function buildDecorations(view: EditorView, showMarkers = false): DecorationSet 
           ).number;
           const isFenced = name === 'FencedCode';
           const firstLineObj = view.state.doc.line(startLine);
+          if (
+            !isFenced &&
+            firstLineObj.text.includes('|') &&
+            startLine + 1 <= endLine &&
+            /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(
+              view.state.doc.line(startLine + 1).text,
+            )
+          ) {
+            return;
+          }
           const fenceIndentCols = isFenced ? Math.max(0, nFrom - firstLineObj.from) : 0;
           let fencedMarginLeft = '';
           if (fenceIndentCols > 0) {
@@ -539,7 +653,9 @@ function buildDecorations(view: EditorView, showMarkers = false): DecorationSet 
             endLine > startLine &&
             /^\s*(`{3,}|~{3,})\s*$/.test(view.state.doc.line(endLine).text);
           const bodyEnd = hasClosingFence ? endLine - 1 : endLine;
-          for (let ln = startLine; ln <= endLine; ln++) {
+          const loopStart = Math.max(startLine, firstVisibleLine);
+          const loopEnd = Math.min(endLine, lastVisibleLine);
+          for (let ln = loopStart; ln <= loopEnd; ln++) {
             const lineObj = view.state.doc.line(ln);
             if (!seenFencedLines.has(lineObj.from)) {
               seenFencedLines.add(lineObj.from);
@@ -588,16 +704,22 @@ function buildDecorations(view: EditorView, showMarkers = false): DecorationSet 
             && !seenCopyBlocks.has(firstLine.from)
           ) {
             seenCopyBlocks.add(firstLine.from);
-            const code = codeBlockClipboardText(
-              view.state.doc,
-              name === 'FencedCode',
-              startLine,
-              endLine,
-            );
-            if (code.trim()) {
+            let hasNonEmptyBody = false;
+            for (let probe = bodyStart; probe <= bodyEnd; probe += 1) {
+              if (view.state.doc.line(probe).text.trim().length > 0) {
+                hasNonEmptyBody = true;
+                break;
+              }
+            }
+            if (hasNonEmptyBody) {
               ranges.push(
                 Decoration.widget({
-                  widget: new CodeCopyWidget(code),
+                  widget: new CodeCopyWidget(
+                    view.state.doc,
+                    isFenced,
+                    startLine,
+                    endLine,
+                  ),
                   side: -1,
                 }).range(firstLine.from),
               );
@@ -671,6 +793,14 @@ function buildDecorations(view: EditorView, showMarkers = false): DecorationSet 
                 leadFrom === lineObj.from
                   ? indentEm
                   : Math.min(8, (nFrom - leadFrom) * 0.55 + markEm);
+              if (!showMarkers && !caretTouches && isBullet && nTo > nFrom) {
+                ranges.push(
+                  Decoration.replace({
+                    widget: new BulletWidget(prefixWidthEm, nFrom - leadFrom),
+                  }).range(leadFrom, prefixTo),
+                );
+                return;
+              }
               ranges.push(
                 Decoration.mark({
                   class: 'cm-md-list-prefix',
@@ -718,37 +848,96 @@ function buildDecorations(view: EditorView, showMarkers = false): DecorationSet 
     // line. Moving the caret onto the line reveals the exact source for
     // editing. Fenced-code lines and inline-code spans are skipped — they
     // must show their source verbatim.
-    const firstVisibleLine = view.state.doc.lineAt(from).number;
-    const lastVisibleLine = view.state.doc.lineAt(
-      Math.min(to, view.state.doc.length),
-    ).number;
     for (let lineNo = firstVisibleLine; lineNo <= lastVisibleLine; lineNo += 1) {
       if (seenInlineHtmlLines.has(lineNo)) continue;
       seenInlineHtmlLines.add(lineNo);
       if (!showMarkers && lineNo >= fromLine && lineNo <= toLine) continue;
       const line = view.state.doc.line(lineNo);
       if (seenFencedLines.has(line.from)) continue;
+      const rawText = line.text;
+      const hasAngle = rawText.includes('<');
+      const hasMarkEq = rawText.includes('==');
+      const hasSupSub = rawText.includes('^') || rawText.includes('~');
+      if (!hasAngle && !hasMarkEq && !hasSupSub) continue;
       const base = line.from;
-      const scanText = maskInlineCode(line.text);
+      const scanText = rawText.includes('`') ? maskInlineCode(rawText) : rawText;
       const tagDeco = showMarkers ? markerMark : hideDeco;
-      for (const span of findInlineHtmlSpans(scanText)) {
-        ranges.push(tagDeco.range(base + span.openFrom, base + span.openTo));
-        if (span.contentTo > span.contentFrom) {
-          ranges.push(
-            inlineHtmlMark(span.kind).range(
-              base + span.contentFrom,
-              base + span.contentTo,
-            ),
-          );
+      if (hasAngle) {
+        for (const span of findInlineHtmlSpans(scanText)) {
+          ranges.push(tagDeco.range(base + span.openFrom, base + span.openTo));
+          if (span.contentTo > span.contentFrom) {
+            ranges.push(
+              inlineHtmlMark(span.kind, span.bgColor, span.textColor).range(
+                base + span.contentFrom,
+                base + span.contentTo,
+              ),
+            );
+          }
+          ranges.push(tagDeco.range(base + span.closeFrom, base + span.closeTo));
         }
-        ranges.push(tagDeco.range(base + span.closeFrom, base + span.closeTo));
       }
-      for (const span of findMarkSpans(scanText)) {
-        ranges.push(tagDeco.range(base + span.openFrom, base + span.openTo));
-        ranges.push(
-          htmlMarkMark.range(base + span.contentFrom, base + span.contentTo),
+      if (hasMarkEq) {
+        for (const span of findMarkSpans(scanText)) {
+          ranges.push(tagDeco.range(base + span.openFrom, base + span.openTo));
+          ranges.push(
+            htmlMarkMark.range(base + span.contentFrom, base + span.contentTo),
+          );
+          ranges.push(tagDeco.range(base + span.closeFrom, base + span.closeTo));
+        }
+      }
+      if (hasSupSub) {
+        for (const span of findSupSubSpans(scanText)) {
+          ranges.push(tagDeco.range(base + span.openFrom, base + span.openTo));
+          if (span.contentTo > span.contentFrom) {
+            ranges.push(
+              inlineHtmlMark(span.kind, span.bgColor, span.textColor).range(
+                base + span.contentFrom,
+                base + span.contentTo,
+              ),
+            );
+          }
+          ranges.push(tagDeco.range(base + span.closeFrom, base + span.closeTo));
+        }
+      }
+    }
+
+    // #285 — Definition list (`Term\n: Definition`) styling in Live Edit mode.
+    for (let lineNo = firstVisibleLine; lineNo <= lastVisibleLine; lineNo += 1) {
+      if (seenDefLines.has(lineNo)) continue;
+      const line = view.state.doc.line(lineNo);
+      if (seenFencedLines.has(line.from)) continue;
+      const ddMatch = line.text.match(/^[ ]{0,3}([:~])([ \t]+)(.+)$/);
+      if (!ddMatch) continue;
+      // Check if preceded by a non-empty term line or another `: def` line
+      let prevNo = lineNo - 1;
+      if (prevNo >= 1 && view.state.doc.line(prevNo).text.trim() === '') {
+        prevNo -= 1;
+      }
+      if (prevNo < 1) continue;
+      const prevLine = view.state.doc.line(prevNo);
+      if (seenFencedLines.has(prevLine.from) || prevLine.text.trim() === '') continue;
+      const prevIsDd = /^[ ]{0,3}[:~][ \t]+/.test(prevLine.text);
+      const prevIsTerm =
+        !prevIsDd &&
+        !/^\s*(?:#{1,6}[ \t]|`{3,}|~{3,}|>|[-*+][ \t]|\d+[.)][ \t]|\||<(?:!--|[a-zA-Z/]))/.test(
+          prevLine.text,
         );
-        ranges.push(tagDeco.range(base + span.closeFrom, base + span.closeTo));
+      if (!prevIsDd && !prevIsTerm) continue;
+      if (prevIsTerm && !seenDefLines.has(prevNo)) {
+        seenDefLines.add(prevNo);
+        ranges.push(
+          Decoration.line({ class: 'cm-md-dt-line' }).range(prevLine.from),
+        );
+      }
+      seenDefLines.add(lineNo);
+      ranges.push(Decoration.line({ class: 'cm-md-dd-line' }).range(line.from));
+      const caretOnLine = lineNo >= fromLine && lineNo <= toLine;
+      const colonStart = line.from + line.text.indexOf(ddMatch[1]);
+      const colonEnd = colonStart + ddMatch[1].length + ddMatch[2].length;
+      if (!showMarkers && !caretOnLine) {
+        ranges.push(hideDeco.range(line.from, colonEnd));
+      } else {
+        ranges.push(markerMark.range(colonStart, colonStart + 1));
       }
     }
   }
@@ -758,12 +947,12 @@ function buildDecorations(view: EditorView, showMarkers = false): DecorationSet 
   return Decoration.set(ranges, true);
 }
 
-const makeLiveRenderPlugin = (showMarkers: boolean) => ViewPlugin.fromClass(
+const makeLiveRenderPlugin = (showMarkers: boolean, hideActiveLineMarkers = false) => ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
 
     constructor(view: EditorView) {
-      this.decorations = buildDecorations(view, showMarkers);
+      this.decorations = buildDecorations(view, showMarkers, hideActiveLineMarkers);
     }
 
     update(u: ViewUpdate) {
@@ -781,13 +970,22 @@ const makeLiveRenderPlugin = (showMarkers: boolean) => ViewPlugin.fromClass(
       const imeFlush = u.transactions.some(isImeSafeFlushTransaction);
       const treeChanged = syntaxTree(u.state) !== syntaxTree(u.startState);
       if (u.docChanged || u.viewportChanged || dragEnded || imeFlush || treeChanged) {
-        this.decorations = buildDecorations(u.view, showMarkers);
+        this.decorations = buildDecorations(u.view, showMarkers, hideActiveLineMarkers);
         return;
       }
       // With markers always shown nothing depends on the caret, so a
       // selection move keeps the exact same decorations — no rebuild, no jump.
+      // Same when `hideActiveLineMarkers` (#303) is enabled and the caret moves
+      // between collapsed positions.
       if (!showMarkers && u.selectionSet && !isDragging(u.state)) {
-        this.decorations = buildDecorations(u.view);
+        if (
+          hideActiveLineMarkers &&
+          u.startState.selection.main.empty &&
+          u.state.selection.main.empty
+        ) {
+          return;
+        }
+        this.decorations = buildDecorations(u.view, showMarkers, hideActiveLineMarkers);
       }
     }
   },
@@ -892,7 +1090,8 @@ const liveEditTheme = EditorView.theme({
   '.cm-md-strike': { textDecoration: 'line-through', color: 'var(--text-muted)' },
   '.cm-md-html-u': { textDecoration: 'underline' },
   '.cm-md-html-mark': {
-    backgroundColor: 'color-mix(in srgb, var(--accent) 24%, transparent)',
+    backgroundColor: 'var(--mark-bg, rgba(255, 212, 0, 0.52))',
+    padding: '0 0.14em',
     borderRadius: '2px',
   },
   '.cm-md-html-sub': { fontSize: '0.75em', verticalAlign: 'sub' },
@@ -950,6 +1149,17 @@ const liveEditTheme = EditorView.theme({
     padding: '0 16px',
     color: 'var(--text-2)',
     backgroundColor: 'var(--bg-elev)',
+  },
+  // #285 — Definition list (`Term\n: Definition`) styling in Live Edit mode.
+  '.cm-md-dt-line': {
+    fontWeight: '600',
+    color: 'var(--text)',
+  },
+  '.cm-md-dd-line': {
+    paddingLeft: '1.5em',
+    borderLeft: '2px solid var(--border)',
+    marginLeft: '0.5em',
+    color: 'var(--text-2)',
   },
 
   // 5.0 §5 — code block: --bg-elev card, 10px corners, 13px mono.
@@ -1049,13 +1259,21 @@ const liveEditTheme = EditorView.theme({
  * we just splice them into the bundle so they live in the same
  * compartment as the rest of the live-edit machinery.
  */
-const liveRenderPlugin = makeLiveRenderPlugin(false);
-const liveRenderPluginShowMarkers = makeLiveRenderPlugin(true);
+const liveRenderPlugin = makeLiveRenderPlugin(false, false);
+const liveRenderPluginHideActive = makeLiveRenderPlugin(false, true);
+const liveRenderPluginShowMarkers = makeLiveRenderPlugin(true, false);
 
-export function liveEditExtension(blocks: any[] = [], opts: { showMarkers?: boolean } = {}) {
+export function liveEditExtension(
+  blocks: any[] = [],
+  opts: { showMarkers?: boolean; hideActiveLineMarkers?: boolean } = {},
+) {
   return [
     syntaxHighlighting(liveEditHighlightStyle),
-    opts.showMarkers ? liveRenderPluginShowMarkers : liveRenderPlugin,
+    opts.showMarkers
+      ? liveRenderPluginShowMarkers
+      : opts.hideActiveLineMarkers
+        ? liveRenderPluginHideActive
+        : liveRenderPlugin,
     liveEditTheme,
     ...blocks,
   ];

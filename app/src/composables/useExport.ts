@@ -5,7 +5,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { writeText, writeHtml, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
 import { documentDir, join } from '@tauri-apps/api/path';
-import { isIOS, isMacOS, isMobile, isWindowsDesktop } from '../lib/platform';
+import { isIOS, isMacOS, isMobile, isWindowsDesktop, revealLabelKey } from '../lib/platform';
+import { revealInFileManager, openDirectoryInFileManager, parentDirOf } from '../lib/reveal-in-file-manager';
 // Loaded per export rather than at startup. Between them these three pull in
 // `docx`, jsPDF + html2canvas and the mermaid renderer — megabytes that a user
 // who only opens a note to read it should never have to compile.
@@ -19,7 +20,7 @@ import { renderMarkdown, extractImageRoot } from '../lib/markdown';
 import { loadRenderDeps } from '../lib/render-deps';
 // Tiny shim: the mermaid bundle itself stays behind a dynamic import inside
 // it, so touching this module costs nothing at startup.
-import { initMermaid } from '../lib/mermaid-lazy';
+import { renderMermaidCached } from '../lib/mermaid-lazy';
 import { waitForPrintFonts } from '../lib/print-fonts';
 // Lazy like the three above: it carries KaTeX's stylesheet as a string and
 // is only needed when a note is actually exported to HTML.
@@ -29,6 +30,7 @@ import { exportDefaultPath } from '../lib/export-paths';
 import { useI18n } from '../i18n';
 import { mountPrintOverlay } from '../lib/print-overlay';
 import {
+  collectPrintOutline,
   decoratePrintToc,
   fillTocPageNumbers,
   printableBox,
@@ -186,10 +188,6 @@ function getEditorSelectionMd(content?: string): string | null {
   return text.trim() ? text : null;
 }
 
-// Mermaid ids must be unique per render across the whole session — mermaid
-// keys internal state off them and reusing one yields an empty diagram.
-let printMermaidId = 0;
-
 export function useExport() {
   const tabs = useTabsStore();
   const toasts = useToastsStore();
@@ -241,6 +239,21 @@ export function useExport() {
     return settings.plantumlEnabled && settings.plantumlServer ? settings.plantumlServer : null;
   }
 
+  /** #553 — load the configured .docx reference template. A stale / moved
+   *  path must not break the export, so failures fall back to the built-in
+   *  preset instead of surfacing as an export error. */
+  async function docxReferenceBytes(): Promise<Uint8Array | null> {
+    const path = settings.docxReferenceDoc?.trim();
+    if (!path) return null;
+    try {
+      const data = await invoke<number[]>('read_binary_file', { path });
+      return data?.length ? new Uint8Array(data) : null;
+    } catch (e) {
+      console.warn('[export] custom DOCX reference template unreadable, using built-in preset', e);
+      return null;
+    }
+  }
+
   async function pickWritePath(
     filename: string,
     filters: { name: string; extensions: string[] }[],
@@ -266,6 +279,29 @@ export function useExport() {
     return t('toast.savedToIos', { name: filename });
   }
 
+  /** #418 / #553 — Post-export toast with buttons to open the output folder
+   *  and to reveal the exported file in Finder / Explorer. */
+  function notifyExportSaved(path: string, message: string) {
+    if (isMobile()) {
+      toasts.success(message);
+      return;
+    }
+    const folder = parentDirOf(path);
+    const actions = [
+      ...(folder
+        ? [{
+            label: settings.language === 'zh' ? '打开所在文件夹' : 'Open Folder',
+            run: () => { void openDirectoryInFileManager(folder); },
+          }]
+        : []),
+      {
+        label: t(revealLabelKey('explorer.reveal')),
+        run: () => { void revealInFileManager(path); },
+      },
+    ];
+    toasts.push(message, 'success', 6000, undefined, { actions });
+  }
+
   // Modern Clipboard API works on all desktops and on iOS 16+ WKWebView,
   // and supports rich types (HTML, PNG) — unlike Tauri's plugin-clipboard-
   // manager iOS implementation which only ships `writeText`.
@@ -276,7 +312,19 @@ export function useExport() {
       && typeof (window as unknown as { ClipboardItem?: unknown }).ClipboardItem !== 'undefined';
   }
 
+  function shouldUseUnifiedDialog(): boolean {
+    if (isMobile()) return false;
+    if (typeof window !== 'undefined' && (window as unknown as { __solomdSavePathOverride?: string }).__solomdSavePathOverride) {
+      return false;
+    }
+    return true;
+  }
+
   async function exportHtml() {
+    if (shouldUseUnifiedDialog()) {
+      openCustomExportDialog({ scope: 'current', format: 'html' });
+      return;
+    }
     track('file_exported', { format: 'html' });
     const ctx = activeOr();
     if (!ctx) return;
@@ -292,10 +340,15 @@ export function useExport() {
         plantumlServer: plantumlServer(),
         codeBlockLineNumbers: settings.codeBlockLineNumbers,
         codeBlockWrap: settings.codeBlockWrap,
+        withNav: settings.exportHtmlWithNav,
+        paginated: settings.exportHtmlWithNav && settings.exportHtmlPaginated,
+        contentWidth: settings.exportHtmlContentWidth,
+        withTocPage: settings.exportIncludeTocPage,
+        lang: settings.language,
       });
       toasts.dismiss(tid);
       await invoke('write_file', { path, content: html, encoding: 'UTF-8' });
-      toasts.success(isIOS() ? iosSavedToast(filename) : t('toast.exportedTo', { format: 'HTML' }));
+      notifyExportSaved(path, isIOS() ? iosSavedToast(filename) : t('toast.exportedTo', { format: 'HTML' }));
     } catch (e) {
       toasts.dismiss(tid);
       toasts.error(t('toast.exportFailedError', { error: String(e) }));
@@ -303,6 +356,10 @@ export function useExport() {
   }
 
   async function exportDocx() {
+    if (shouldUseUnifiedDialog()) {
+      openCustomExportDialog({ scope: 'current', format: 'docx' });
+      return;
+    }
     track('file_exported', { format: 'docx' });
     const ctx = activeOr();
     if (!ctx) return;
@@ -317,11 +374,13 @@ export function useExport() {
         settings.docxPreset,
         t('docx.contents'),
         plantumlServer(),
+        await docxReferenceBytes(),
+        settings.exportIncludeTocPage,
       );
       const buffer = new Uint8Array(await blob.arrayBuffer());
       // Tauri 2 serializes Uint8Array as a number array which Rust accepts as Vec<u8>.
       await invoke('write_binary_file', { path, data: Array.from(buffer) });
-      toasts.success(isIOS() ? iosSavedToast(filename) : t('toast.exportedTo', { format: 'DOCX' }));
+      notifyExportSaved(path, isIOS() ? iosSavedToast(filename) : t('toast.exportedTo', { format: 'DOCX' }));
     } catch (e) {
       console.error(e);
       toasts.error(t('toast.formatExportFailed', { format: 'DOCX', error: String(e) }));
@@ -330,6 +389,10 @@ export function useExport() {
 
   /** Native-feel PDF export: build a real .pdf file via html2pdf.js. */
   async function exportPdf() {
+    if (shouldUseUnifiedDialog()) {
+      openCustomExportDialog({ scope: 'current', format: 'pdf' });
+      return;
+    }
     track('file_exported', { format: 'pdf' });
     const ctx = activeOr();
     if (!ctx) return;
@@ -350,11 +413,16 @@ export function useExport() {
         ctx.filePath,
         plantumlServer(),
         settings.codeBlockLineNumbers,
+        {
+          includeOutline: settings.exportHtmlWithNav,
+          includeTocPage: settings.exportIncludeTocPage,
+          tocTitle: t('settings.pdfDefaults.tocTitle'),
+        },
       );
       const buffer = new Uint8Array(await blob.arrayBuffer());
       await invoke('write_binary_file', { path, data: Array.from(buffer) });
       toasts.dismiss(tid);
-      toasts.success(isIOS() ? iosSavedToast(filename) : t('toast.exportedTo', { format: 'PDF' }));
+      notifyExportSaved(path, isIOS() ? iosSavedToast(filename) : t('toast.exportedTo', { format: 'PDF' }));
     } catch (e) {
       console.error(e);
       toasts.dismiss(tid);
@@ -380,28 +448,26 @@ export function useExport() {
   async function renderPrintMermaid(container: HTMLElement, dark: boolean) {
     const blocks = container.querySelectorAll('pre > code.language-mermaid');
     if (!blocks.length) return;   // no diagrams: never load the renderer
-    const mermaid = await initMermaid({
-      startOnLoad: false,
-      securityLevel: 'strict',
-      theme: dark ? 'dark' : 'default',
-    });
+    // #522 — shared serial queue + theme-keyed cache. `await` still waits
+    // for every diagram, so the native print sheet never sees a half-drawn
+    // overlay, but the UI stays responsive while they render.
+    const printThemeName = dark ? 'dark' : 'default';
     for (const block of Array.from(blocks)) {
       const pre = block.parentElement as HTMLElement | null;
       if (!pre) continue;
       const code = (block.textContent || '').trim();
-      const id = `print-mmd-${++printMermaidId}`;
-      try {
-        const { svg } = await mermaid.render(id, code);
+      const result = await renderMermaidCached(printThemeName, code);
+      if (result.svg) {
         const wrap = document.createElement('div');
         wrap.className = 'mermaid-block';
-        wrap.innerHTML = svg;
+        wrap.innerHTML = result.svg;
         pre.replaceWith(wrap);
-      } catch (e) {
+      } else {
         // A broken diagram must not abort the print — show the reason where
         // the diagram would have been, exactly like the Preview pane does.
         const err = document.createElement('pre');
         err.className = 'mermaid-error';
-        err.textContent = `Mermaid error: ${(e as Error).message}`;
+        err.textContent = `Mermaid error: ${result.error ?? 'unknown error'}`;
         pre.replaceWith(err);
       }
     }
@@ -420,6 +486,10 @@ export function useExport() {
    * WebKitGTK print on Linux).
    */
   async function exportPdfPrint(options?: { forcePrintDialog?: boolean }) {
+    if (!options?.forcePrintDialog && shouldUseUnifiedDialog()) {
+      openCustomExportDialog({ scope: 'current', format: 'pdf' });
+      return;
+    }
     track('file_exported', { format: options?.forcePrintDialog ? 'print' : 'pdf_print' });
     const ctx = activeOr();
     if (!ctx) return;
@@ -518,23 +588,37 @@ export function useExport() {
     // Give KaTeX / images a tick to apply layout before print.
     await new Promise((r) => setTimeout(r, 200));
 
-    // #347 — the TOC page gets a title, and page numbers when the page size is
-    // known (Settings → PDF or `pdf:` front matter). Measured after mermaid
-    // and the layout tick above, since both change where pages break.
-    if (pdfOpts.toc && printContent) {
+    // #347 / #515 — the TOC page gets a title and page numbers, and we also
+    // collect heading page numbers for the PDF document outline (bookmarks).
+    let printOutlines: Array<[number, string, number]> = [];
+    if (printContent) {
       try {
-        const nav = decoratePrintToc(printContent, t('settings.pdfDefaults.tocTitle'));
-        const box = printableBox(pdfOpts.pageSizeMm, pdfOpts.marginMm);
-        if (nav && box) {
-          withPrintPagination(printOverlay, printContent, box, (p) =>
-            fillTocPageNumbers(nav, printContent, p.pageOf),
-          );
-        } else if (nav) {
-          fillTocPageNumbers(nav, printContent, null);
+        const nav = decoratePrintToc(
+          printContent,
+          pdfOpts.toc ? t('settings.pdfDefaults.tocTitle') : '',
+        );
+        const box = printableBox(
+          pdfOpts.pageSizeMm ?? { width: 210, height: 297 },
+          pdfOpts.marginMm ?? { top: 15, right: 15, bottom: 15, left: 15 },
+        );
+        if (box) {
+          withPrintPagination(printOverlay, printContent, box, (p) => {
+            if (nav) {
+              fillTocPageNumbers(
+                nav,
+                printContent,
+                pdfOpts.pageSizeMm && pdfOpts.marginMm ? p.pageOf : null,
+              );
+            }
+            printOutlines = collectPrintOutline(printContent, p.pageOf);
+          });
+        } else {
+          if (nav) fillTocPageNumbers(nav, printContent, null);
+          printOutlines = collectPrintOutline(printContent, null);
         }
       } catch (e) {
         // Numbers are a nicety; a failure here must never stop the print.
-        console.error('[print] toc page numbers failed', e);
+        console.error('[print] toc/outline page numbers failed', e);
       }
     }
     try {
@@ -558,12 +642,13 @@ export function useExport() {
                   mmToPt(pdfOpts.marginMm.left),
                 ]
               : [mmToPt(15), mmToPt(15), mmToPt(15), mmToPt(15)],
+            outlines: printOutlines,
           });
         } finally {
           toasts.dismiss(tid);
         }
         cleanup();
-        toasts.success(t('toast.exportedTo', { format: 'PDF' }));
+        notifyExportSaved(directPath, t('toast.exportedTo', { format: 'PDF' }));
         return;
       }
       await invoke('print_webview');
@@ -688,6 +773,10 @@ export function useExport() {
    * of the whole document.
    */
   async function exportImage() {
+    if (shouldUseUnifiedDialog()) {
+      openCustomExportDialog({ scope: 'current', format: 'png' });
+      return;
+    }
     track('file_exported', { format: 'image' });
     const ctx = activeOr();
     if (!ctx) return;
@@ -714,7 +803,7 @@ export function useExport() {
         : isSelection
           ? t('toast.exportedSelectionPng')
           : t('toast.exportedPng');
-      toasts.success(msg);
+      notifyExportSaved(path, msg);
     } catch (e) {
       console.error(e);
       toasts.dismiss(tid);
@@ -793,6 +882,188 @@ export function useExport() {
     await exportPdfPrint({ forcePrintDialog: true });
   }
 
+  /**
+   * #535 / #359 / #572 — Direct export of a single note to `outputPath` in the
+   * chosen format without opening a per-file Save dialog. Used by CustomExportDialog
+   * for both single-note custom export and batch folder export.
+   */
+  async function exportNoteToFile(input: {
+    content: string;
+    baseName: string;
+    filePath?: string;
+    outputPath: string;
+    format: 'pdf' | 'html' | 'docx' | 'epub' | 'odt' | 'latex' | 'rtf' | 'png' | 'textpack';
+    includeBookmarks?: boolean;
+    includeTocPage?: boolean;
+    htmlPaginated?: boolean;
+    htmlContentWidth?: number;
+  }): Promise<void> {
+    const {
+      content,
+      baseName,
+      filePath,
+      outputPath,
+      format,
+      includeBookmarks = settings.exportHtmlWithNav,
+      includeTocPage = settings.exportIncludeTocPage,
+      htmlPaginated = settings.exportHtmlPaginated,
+      htmlContentWidth = settings.exportHtmlContentWidth,
+    } = input;
+    if (format === 'epub' || format === 'odt' || format === 'latex' || format === 'rtf') {
+      const { preprocessMarkdown } = await import('../lib/markdown');
+      const { buildPandocFromArg, prepareMarkdownForPandoc } = await import('../lib/pandoc-markdown');
+      const { pandocResourcePaths } = await import('../lib/pandoc-resource-paths');
+      const { useWorkspaceStore } = await import('../stores/workspace');
+      const workspace = useWorkspaceStore();
+      let cleanedMarkdown = prepareMarkdownForPandoc(preprocessMarkdown(content));
+      // #578 — Render Mermaid fences to high-DPI PNG data URIs before Pandoc
+      // runs so EPUB / ODT / RTF exports display real diagrams instead of raw code.
+      if (format === 'epub' || format === 'odt' || format === 'rtf') {
+        const { renderMermaidFencesInMarkdown } = await import('../lib/diagram-export');
+        cleanedMarkdown = await renderMermaidFencesInMarkdown(cleanedMarkdown);
+      }
+      const extraArgs: string[] = [
+        buildPandocFromArg(settings.markdownHardBreaks),
+        `--metadata=title:${baseName}`,
+      ];
+      if (includeBookmarks || includeTocPage) {
+        extraArgs.push('--toc', '--toc-depth=6');
+      }
+      if (format === 'latex' || format === 'rtf') {
+        extraArgs.push('--standalone');
+      }
+      let cssContent: string | null = null;
+      if (format === 'epub') {
+        const { SOLOMD_EPUB_CSS } = await import('../lib/epub-style');
+        cssContent = SOLOMD_EPUB_CSS;
+      }
+      const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      const yaml = fmMatch ? fmMatch[1] : '';
+      const bibMatch = yaml.match(/^bibliography\s*:\s*(.+?)\s*$/m);
+      const cslMatch = yaml.match(/^csl\s*:\s*(.+?)\s*$/m);
+      const stripQ = (v?: string) => (v ? v.trim().replace(/^["']|["']$/g, '') : '');
+      const sAny = settings as unknown as { workspaceBibliography?: string; workspaceCsl?: string };
+      const bibliography = stripQ(bibMatch?.[1]) || (sAny.workspaceBibliography || '').trim() || null;
+      const csl = stripQ(cslMatch?.[1]) || (sAny.workspaceCsl || '').trim() || null;
+      await invoke('pandoc_export', {
+        args: {
+          input_markdown: cleanedMarkdown,
+          format,
+          output_path: outputPath,
+          bibliography,
+          csl,
+          template: null,
+          extra_args: extraArgs,
+          resource_paths: pandocResourcePaths(filePath ?? null, workspace.currentFolder),
+          css_content: cssContent,
+        },
+      });
+      return;
+    }
+    if (format === 'textpack') {
+      const { rewriteMarkdownForTextBundle, createTextPackArchive } = await import('../lib/textbundle');
+      const { rewrittenMarkdown, assets } = rewriteMarkdownForTextBundle(content);
+      const assetBytes: Record<string, Uint8Array> = {};
+      const noteDir = filePath
+        ? filePath.slice(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\')))
+        : '';
+      for (const ref of assets) {
+        let absPath = ref.rawPath;
+        try {
+          absPath = decodeURIComponent(absPath);
+        } catch {
+          // keep raw
+        }
+        if (!absPath.startsWith('/') && !/^[a-zA-Z]:[\\/]/.test(absPath) && noteDir) {
+          const sep = noteDir.includes('\\') ? '\\' : '/';
+          absPath = `${noteDir}${sep}${absPath.replace(/^\.[\\/]/, '').replace(/[\\/]/g, sep)}`;
+        }
+        try {
+          const bytes = await invoke<number[]>('read_binary_file', { path: absPath });
+          if (bytes && bytes.length > 0) {
+            assetBytes[ref.bundleFileName] = new Uint8Array(bytes);
+          }
+        } catch {
+          // Skip missing local asset
+        }
+      }
+      const zipBuf = createTextPackArchive(rewrittenMarkdown, assetBytes);
+      await invoke('write_binary_file', { path: outputPath, data: Array.from(zipBuf) });
+      return;
+    }
+    if (format === 'html') {
+      const html = await buildStandaloneHtml({
+        content,
+        title: baseName,
+        filePath,
+        plantumlServer: plantumlServer(),
+        codeBlockLineNumbers: settings.codeBlockLineNumbers,
+        codeBlockWrap: settings.codeBlockWrap,
+        withNav: includeBookmarks,
+        paginated: includeBookmarks && htmlPaginated,
+        contentWidth: htmlContentWidth,
+        withTocPage: includeTocPage,
+        lang: settings.language,
+      });
+      await invoke('write_file', { path: outputPath, content: html, encoding: 'UTF-8' });
+      return;
+    }
+    if (format === 'docx') {
+      const blob = await markdownToDocxBlob(
+        content,
+        baseName,
+        filePath,
+        settings.docxPreset,
+        t('docx.contents'),
+        plantumlServer(),
+        await docxReferenceBytes(),
+        includeTocPage,
+      );
+      const buffer = new Uint8Array(await blob.arrayBuffer());
+      await invoke('write_binary_file', { path: outputPath, data: Array.from(buffer) });
+      return;
+    }
+    if (format === 'pdf') {
+      const pdfOpts = resolvePdfOptions(
+        settings.pdfDefaults,
+        content,
+        userTouchedPdfDefaults(settings.pdfDefaults),
+      );
+      const blob = await markdownToPdfBlob(
+        content,
+        baseName,
+        pdfOpts,
+        filePath,
+        plantumlServer(),
+        settings.codeBlockLineNumbers,
+        {
+          includeOutline: includeBookmarks,
+          includeTocPage,
+          tocTitle: t('settings.pdfDefaults.tocTitle'),
+        },
+      );
+      const buffer = new Uint8Array(await blob.arrayBuffer());
+      await invoke('write_binary_file', { path: outputPath, data: Array.from(buffer) });
+      return;
+    }
+    if (format === 'png') {
+      const blob = await markdownToImageBlob(content, baseName, filePath, {
+        branding: settings.imageExportBranding,
+        codeBlockLineNumbers: settings.codeBlockLineNumbers,
+        codeBlockWrap: settings.codeBlockWrap,
+      });
+      const buffer = new Uint8Array(await blob.arrayBuffer());
+      await invoke('write_binary_file', { path: outputPath, data: Array.from(buffer) });
+    }
+  }
+
+  function openCustomExportDialog(preset?: {
+    scope?: 'current' | 'folder';
+    format?: 'pdf' | 'html' | 'docx' | 'epub' | 'odt' | 'latex' | 'rtf' | 'png' | 'textpack';
+  }) {
+    window.dispatchEvent(new CustomEvent('solomd:open-custom-export', { detail: preset }));
+  }
+
   return {
     exportHtml,
     exportDocx,
@@ -800,6 +1071,8 @@ export function useExport() {
     exportPdfPrint,
     printDocument,
     exportImage,
+    exportNoteToFile,
+    openCustomExportDialog,
     copyAsHtml,
     copyAsWord,
     copyAsPlainText,

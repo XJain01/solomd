@@ -428,16 +428,20 @@ pub async fn print_webview_to_pdf(
     path: String,
     paper: Option<(f64, f64)>,
     margins: Option<(f64, f64, f64, f64)>,
+    outlines: Option<Vec<(u8, String, usize)>>,
 ) -> Result<(), String> {
     use objc2::runtime::AnyObject;
     use objc2::{class, msg_send};
-    use objc2_foundation::{NSSize, NSString, NSURL};
+    use objc2_foundation::{NSPoint, NSSize, NSString, NSURL};
 
     #[link(name = "AppKit", kind = "framework")]
     extern "C" {
         static NSPrintSaveJob: &'static NSString;
         static NSPrintJobSavingURL: &'static NSString;
     }
+
+    #[link(name = "PDFKit", kind = "framework")]
+    extern "C" {}
 
     let _ = std::fs::remove_file(&path);
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
@@ -527,6 +531,54 @@ pub async fn print_webview_to_pdf(
             let mut buf = Vec::new();
             f.read_to_end(&mut buf).map_err(|e| e.to_string())?;
             if buf.windows(5).any(|w| w == b"%%EOF") {
+                if let Some(items) = outlines.as_ref().filter(|v| !v.is_empty()) {
+                    unsafe {
+                        let url = NSURL::fileURLWithPath(&NSString::from_str(&path2));
+                        let doc_alloc: *mut AnyObject = msg_send![class!(PDFDocument), alloc];
+                        let doc: *mut AnyObject = msg_send![doc_alloc, initWithURL: &*url];
+                        if !doc.is_null() {
+                            let page_count: usize = msg_send![doc, pageCount];
+                            if page_count > 0 {
+                                let root: *mut AnyObject = msg_send![class!(PDFOutline), new];
+                                let mut stack: Vec<(u8, *mut AnyObject)> = Vec::new();
+                                for (level, label, page_num) in items {
+                                    let idx = page_num.saturating_sub(1).min(page_count - 1);
+                                    let page: *mut AnyObject = msg_send![doc, pageAtIndex: idx];
+                                    if page.is_null() {
+                                        continue;
+                                    }
+                                    let child: *mut AnyObject = msg_send![class!(PDFOutline), new];
+                                    let label_ns = NSString::from_str(label);
+                                    let _: () = msg_send![child, setLabel: &*label_ns];
+                                    let dest_alloc: *mut AnyObject =
+                                        msg_send![class!(PDFDestination), alloc];
+                                    let dest: *mut AnyObject = msg_send![
+                                        dest_alloc,
+                                        initWithPage: page,
+                                        atPoint: NSPoint::new(0.0, 792.0)
+                                    ];
+                                    if !dest.is_null() {
+                                        let _: () = msg_send![child, setDestination: dest];
+                                        let _: () = msg_send![dest, release];
+                                    }
+                                    while stack.last().is_some_and(|(l, _)| *l >= *level) {
+                                        stack.pop();
+                                    }
+                                    let parent = stack.last().map_or(root, |(_, node)| *node);
+                                    let n_children: usize = msg_send![parent, numberOfChildren];
+                                    let _: () =
+                                        msg_send![parent, insertChild: child, atIndex: n_children];
+                                    let _: () = msg_send![child, release];
+                                    stack.push((*level, child));
+                                }
+                                let _: () = msg_send![doc, setOutlineRoot: root];
+                                let _: bool = msg_send![doc, writeToURL: &*url];
+                                let _: () = msg_send![root, release];
+                            }
+                            let _: () = msg_send![doc, release];
+                        }
+                    }
+                }
                 return Ok(());
             }
         }
@@ -542,6 +594,7 @@ pub async fn print_webview_to_pdf(
     _path: String,
     _paper: Option<(f64, f64)>,
     _margins: Option<(f64, f64, f64, f64)>,
+    _outlines: Option<Vec<(u8, String, usize)>>,
 ) -> Result<(), String> {
     Err("direct PDF export is macOS-only; use print_webview".into())
 }
@@ -768,9 +821,141 @@ pub fn webview_runtime_version() -> Option<String> {
     tauri::webview_version().ok()
 }
 
+/// #541 — Fallback clipboard text reader for Linux Wayland (e.g. Ubuntu 26.04 /
+/// GNOME 50 + GSConnect), where WebKitGTK's `ClipboardEvent.clipboardData` can
+/// arrive empty and `arboard` X11/wlr-data-control cannot read GNOME Shell's
+/// Wayland selection offer while `wl-paste` (or `xclip` / `xsel`) succeeds.
+#[tauri::command]
+pub async fn clipboard_read_text_fallback() -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        return tokio::task::spawn_blocking(|| {
+            let candidates: &[(&str, &[&str])] = &[
+                ("wl-paste", &["--no-newline"]),
+                ("wl-paste", &["--no-newline", "--type", "text/plain;charset=utf-8"]),
+                ("wl-paste", &["--no-newline", "--type", "text/plain"]),
+                ("wl-paste", &["--no-newline", "--type", "UTF8_STRING"]),
+                ("xclip", &["-o", "-selection", "clipboard"]),
+                ("xsel", &["-ob"]),
+            ];
+            for (bin, args) in candidates {
+                if let Ok(out) = std::process::Command::new(bin).args(*args).output() {
+                    if out.status.success() && !out.stdout.is_empty() {
+                        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+                        if !text.is_empty() {
+                            return Ok(text);
+                        }
+                    }
+                }
+            }
+            Ok(String::new())
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(String::new())
+    }
+}
+
+/// #492 — Automatically switch the OS input method to an ASCII layout when
+/// leaving Vim Insert mode (`mode == "normal"`), and restore the user's
+/// previous input method when re-entering Insert mode (`mode == "insert"`).
+#[tauri::command]
+pub fn vim_switch_input_method(app: tauri::AppHandle, mode: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::c_void;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        #[link(name = "Carbon", kind = "framework")]
+        extern "C" {
+            fn TISCopyCurrentKeyboardInputSource() -> *mut c_void;
+            fn TISCopyCurrentASCIICapableKeyboardInputSource() -> *mut c_void;
+            fn TISSelectInputSource(source: *mut c_void) -> i32;
+        }
+        #[link(name = "CoreFoundation", kind = "framework")]
+        extern "C" {
+            fn CFRelease(cf: *const c_void);
+        }
+
+        static SAVED_INPUT_SOURCE: AtomicUsize = AtomicUsize::new(0);
+
+        let is_insert = mode == "insert";
+        let _ = app.run_on_main_thread(move || unsafe {
+            if is_insert {
+                let prev = SAVED_INPUT_SOURCE.swap(0, Ordering::SeqCst) as *mut c_void;
+                if !prev.is_null() {
+                    let _ = TISSelectInputSource(prev);
+                    CFRelease(prev);
+                }
+            } else {
+                let current = TISCopyCurrentKeyboardInputSource();
+                let ascii = TISCopyCurrentASCIICapableKeyboardInputSource();
+                if !current.is_null() && !ascii.is_null() {
+                    if current != ascii {
+                        let old = SAVED_INPUT_SOURCE.swap(current as usize, Ordering::SeqCst)
+                            as *mut c_void;
+                        if !old.is_null() {
+                            CFRelease(old);
+                        }
+                        let _ = TISSelectInputSource(ascii);
+                    } else {
+                        CFRelease(current);
+                    }
+                } else if !current.is_null() {
+                    CFRelease(current);
+                }
+                if !ascii.is_null() {
+                    CFRelease(ascii);
+                }
+            }
+        });
+        return Ok(());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static SAVED_FCITX_ACTIVE: AtomicBool = AtomicBool::new(false);
+        let _ = &app;
+        let is_insert = mode == "insert";
+        std::thread::spawn(move || {
+            for bin in ["fcitx5-remote", "fcitx-remote"] {
+                if is_insert {
+                    if SAVED_FCITX_ACTIVE.swap(false, Ordering::SeqCst) {
+                        let _ = std::process::Command::new(bin).arg("-o").output();
+                    }
+                    break;
+                } else if let Ok(out) = std::process::Command::new(bin).output() {
+                    if out.status.success() {
+                        let state = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                        if state == "2" {
+                            SAVED_FCITX_ACTIVE.store(true, Ordering::SeqCst);
+                            let _ = std::process::Command::new(bin).arg("-c").output();
+                        }
+                        break;
+                    }
+                }
+            }
+        });
+        return Ok(());
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = (&app, mode);
+        Ok(())
+    }
+}
+
 #[tauri::command]
 pub fn fs_dir_exists(path: String) -> bool {
     Path::new(&path).is_dir()
+}
+
+#[tauri::command]
+pub fn fs_files_exist(paths: Vec<String>) -> Vec<bool> {
+    paths.iter().map(|p| Path::new(p).is_file()).collect()
 }
 
 #[tauri::command]
@@ -779,7 +964,25 @@ pub fn fs_file_exists(path: String) -> bool {
 }
 
 #[tauri::command]
-pub fn fs_rename(from: String, to: String) -> Result<(), String> {
+pub async fn fs_rename(
+    from: String,
+    to: String,
+    workspace_root: Option<String>,
+    update_links: Option<bool>,
+) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs_rename_with_workspace(from, to, workspace_root, update_links.unwrap_or(true))
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
+}
+
+pub fn fs_rename_with_workspace(
+    from: String,
+    to: String,
+    workspace_root: Option<String>,
+    update_links: bool,
+) -> Result<Vec<String>, String> {
     let from_p = Path::new(&from);
     let to_p = Path::new(&to);
     if !from_p.exists() {
@@ -812,20 +1015,31 @@ pub fn fs_rename(from: String, to: String) -> Result<(), String> {
 
     fs::rename(from_p, to_p).map_err(|e| format!("rename failed: {e}"))?;
 
+    let mut extra_pairs: Vec<(Vec<String>, Vec<String>)> = Vec::new();
     if let (Some(fa), Some(ta)) = (from_assets, to_assets) {
         if fa.is_dir() && !ta.exists() {
             if let Err(e) = fs::rename(&fa, &ta) {
                 eprintln!("[fs_rename] assets folder rename failed: {e}");
-            } else if stems_differ && is_markdown_path(to_p) {
-                // Stem changed → relative refs inside the body now point at
-                // a folder that no longer exists. Rewrite them in place.
-                if let Err(e) = rewrite_assets_refs(to_p, &fa, &ta) {
-                    eprintln!("[fs_rename] body rewrite failed: {e}");
+            } else {
+                extra_pairs.push((abs_segments(&fa), abs_segments(&ta)));
+                if stems_differ && is_markdown_path(to_p) {
+                    // Stem changed → relative refs inside the body now point at
+                    // a folder that no longer exists. Rewrite them in place.
+                    if let Err(e) = rewrite_assets_refs(to_p, &fa, &ta) {
+                        eprintln!("[fs_rename] body rewrite failed: {e}");
+                    }
                 }
             }
         }
     }
-    Ok(())
+
+    let mut updated = Vec::new();
+    if update_links {
+        if let Some(ws) = workspace_root.as_deref().filter(|s| !s.is_empty()) {
+            updated = relink_inbound_workspace_links(Path::new(ws), from_p, to_p, &extra_pairs);
+        }
+    }
+    Ok(updated)
 }
 
 /// Given a path like `/a/b/foo.md`, return `/a/b/foo.assets`. Returns None
@@ -906,11 +1120,30 @@ fn rewrite_assets_refs(file: &Path, old_assets: &Path, new_assets: &Path) -> Res
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn fs_move(from: String, to: String) -> Result<(), String> {
-    fs_move_inner(from, to)
+pub async fn fs_move(
+    from: String,
+    to: String,
+    workspace_root: Option<String>,
+    update_links: Option<bool>,
+) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs_move_with_workspace(from, to, workspace_root, update_links.unwrap_or(true))
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
 }
 
+#[allow(dead_code)]
 pub fn fs_move_inner(from: String, to: String) -> Result<(), String> {
+    fs_move_with_workspace(from, to, None, true).map(|_| ())
+}
+
+pub fn fs_move_with_workspace(
+    from: String,
+    to: String,
+    workspace_root: Option<String>,
+    update_links: bool,
+) -> Result<Vec<String>, String> {
     let from_p = Path::new(&from);
     let to_p = Path::new(&to);
     if !from_p.exists() {
@@ -942,19 +1175,29 @@ pub fn fs_move_inner(from: String, to: String) -> Result<(), String> {
     move_tree(from_p, to_p)?;
 
     let mut moved_roots: Vec<Vec<String>> = vec![abs_segments(from_p)];
+    let mut extra_pairs: Vec<(Vec<String>, Vec<String>)> = Vec::new();
     if let (Some(fa), Some(ta)) = (from_assets, to_assets) {
         if fa.is_dir() && !ta.exists() {
             match move_tree(&fa, &ta) {
                 // The assets folder moved too, so links into it must NOT be
                 // rewritten — record it as part of the moved set.
-                Ok(()) => moved_roots.push(abs_segments(&fa)),
+                Ok(()) => {
+                    moved_roots.push(abs_segments(&fa));
+                    extra_pairs.push((abs_segments(&fa), abs_segments(&ta)));
+                }
                 Err(e) => eprintln!("[fs_move] assets folder move failed: {e}"),
             }
         }
     }
 
-    relink_moved_tree(to_p, from_p, &moved_roots);
-    Ok(())
+    let mut updated = Vec::new();
+    if update_links {
+        relink_moved_tree(to_p, from_p, &moved_roots);
+        if let Some(ws) = workspace_root.as_deref().filter(|s| !s.is_empty()) {
+            updated = relink_inbound_workspace_links(Path::new(ws), from_p, to_p, &extra_pairs);
+        }
+    }
+    Ok(updated)
 }
 
 /// True when `inner` is `outer` itself or sits underneath it. `inner` is the
@@ -1256,6 +1499,11 @@ fn relink_moved_tree(new_root: &Path, old_root: &Path, moved_roots: &[Vec<String
             continue;
         }
         let Ok(bytes) = fs::read(&file) else { continue };
+        // Every Markdown link `[...](...)`, reference def `[id]: ...`, or wikilink
+        // `[[...]]` contains `]` — skip files with no `]` before UTF-8 + line regexes.
+        if !bytes.contains(&b']') {
+            continue;
+        }
         let Ok(body) = std::str::from_utf8(&bytes) else {
             continue;
         };
@@ -1265,6 +1513,425 @@ fn relink_moved_tree(new_root: &Path, old_root: &Path, moved_roots: &[Vec<String
             }
         }
     }
+}
+
+fn wikilink_re() -> &'static regex_lite::Regex {
+    static RE: std::sync::OnceLock<regex_lite::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| regex_lite::Regex::new(r"\[\[([^\[\]\n]+)\]\]").unwrap())
+}
+
+fn strip_markdown_ext(s: &str) -> &str {
+    for ext in [".md", ".markdown", ".mdown", ".mkd"] {
+        if s.len() > ext.len() && s[s.len() - ext.len()..].eq_ignore_ascii_case(ext) {
+            return &s[..s.len() - ext.len()];
+        }
+    }
+    s
+}
+
+struct InboundRewriteCtx {
+    old_segs: Vec<String>,
+    new_segs: Vec<String>,
+    old_rel_segs: Vec<String>,
+    new_rel_segs: Vec<String>,
+    is_dir: bool,
+    is_md_file: bool,
+    old_stem: String,
+    new_stem: String,
+    old_name: String,
+    new_name: String,
+    allow_stem_wikilink: bool,
+    extra_dir_pairs: Vec<(Vec<String>, Vec<String>)>,
+}
+
+fn shift_inbound_relative_target(
+    t: &str,
+    in_angle: bool,
+    doc_dir_segs: &[String],
+    ctx: &InboundRewriteCtx,
+) -> Option<String> {
+    if is_external_target(t) {
+        return None;
+    }
+    let cut = t.find(['#', '?']).unwrap_or(t.len());
+    let (raw_path, suffix) = t.split_at(cut);
+    if raw_path.is_empty() {
+        return None;
+    }
+    let decoded_path = raw_path.replace("%20", " ");
+    let resolved = lexical_resolve(doc_dir_segs, &decoded_path)?;
+
+    let mut mapped_target: Option<Vec<String>> = None;
+    if ctx.is_dir {
+        if resolved.len() > ctx.old_segs.len() && resolved.starts_with(&ctx.old_segs) {
+            let mut next = ctx.new_segs.clone();
+            next.extend_from_slice(&resolved[ctx.old_segs.len()..]);
+            mapped_target = Some(next);
+        }
+    } else if resolved == ctx.old_segs {
+        mapped_target = Some(ctx.new_segs.clone());
+    }
+    if mapped_target.is_none() {
+        for (old_dir, new_dir) in &ctx.extra_dir_pairs {
+            if resolved.len() > old_dir.len() && resolved.starts_with(old_dir) {
+                let mut next = new_dir.clone();
+                next.extend_from_slice(&resolved[old_dir.len()..]);
+                mapped_target = Some(next);
+                break;
+            }
+        }
+    }
+
+    let new_target = mapped_target?;
+    let mut rel = lexical_relative(doc_dir_segs, &new_target);
+    if raw_path.starts_with("./") && !rel.starts_with('.') {
+        rel = format!("./{rel}");
+    }
+    if !in_angle && (rel.contains(' ') || raw_path.contains("%20")) {
+        rel = rel.replace(' ', "%20");
+    }
+    let out = format!("{rel}{suffix}");
+    if out == t {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+fn shift_inbound_wikilink_inner(inner: &str, ctx: &InboundRewriteCtx) -> Option<String> {
+    let (before_pipe, pipe_suffix) = match inner.find('|') {
+        Some(i) => (&inner[..i], &inner[i..]),
+        None => (inner, ""),
+    };
+    let (raw_target, hash_suffix) = match before_pipe.find('#') {
+        Some(i) => (&before_pipe[..i], &before_pipe[i..]),
+        None => (before_pipe, ""),
+    };
+    let lead_len = raw_target.len() - raw_target.trim_start().len();
+    let trail_len = raw_target.len() - raw_target.trim_end().len();
+    let trimmed = raw_target.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lead_ws = &raw_target[..lead_len];
+    let trail_ws = &raw_target[raw_target.len() - trail_len..];
+
+    let new_target: Option<String> = if trimmed.contains('/') || trimmed.contains('\\') {
+        let segs: Vec<&str> = trimmed.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
+        if ctx.is_dir {
+            if segs.len() > ctx.old_rel_segs.len()
+                && segs[..ctx.old_rel_segs.len()]
+                    .iter()
+                    .zip(&ctx.old_rel_segs)
+                    .all(|(a, b)| a.to_lowercase() == b.to_lowercase())
+            {
+                let mut out_segs = ctx.new_rel_segs.clone();
+                out_segs.extend(segs[ctx.old_rel_segs.len()..].iter().map(|s| (*s).to_string()));
+                Some(out_segs.join("/"))
+            } else {
+                None
+            }
+        } else if segs.len() == ctx.old_rel_segs.len() {
+            let dir_matches = segs[..segs.len() - 1]
+                .iter()
+                .zip(&ctx.old_rel_segs[..ctx.old_rel_segs.len() - 1])
+                .all(|(a, b)| a.to_lowercase() == b.to_lowercase());
+            if !dir_matches {
+                None
+            } else {
+                let last = segs[segs.len() - 1];
+                let last_lc = last.to_lowercase();
+                if ctx.is_md_file {
+                    if last_lc == ctx.old_stem.to_lowercase() {
+                        let mut out_segs = ctx.new_rel_segs[..ctx.new_rel_segs.len() - 1].to_vec();
+                        out_segs.push(ctx.new_stem.clone());
+                        Some(out_segs.join("/"))
+                    } else if last_lc == ctx.old_name.to_lowercase() {
+                        Some(ctx.new_rel_segs.join("/"))
+                    } else {
+                        None
+                    }
+                } else if last_lc == ctx.old_name.to_lowercase() {
+                    Some(ctx.new_rel_segs.join("/"))
+                } else {
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else if !ctx.is_dir && ctx.allow_stem_wikilink && ctx.old_name != ctx.new_name {
+        let trimmed_lc = trimmed.to_lowercase();
+        if ctx.is_md_file {
+            if trimmed_lc == ctx.old_stem.to_lowercase() {
+                Some(ctx.new_stem.clone())
+            } else if trimmed_lc == ctx.old_name.to_lowercase() {
+                Some(ctx.new_name.clone())
+            } else {
+                None
+            }
+        } else if trimmed_lc == ctx.old_name.to_lowercase() {
+            Some(ctx.new_name.clone())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let replaced = new_target?;
+    let rebuilt = format!("{lead_ws}{replaced}{trail_ws}{hash_suffix}{pipe_suffix}");
+    if rebuilt == inner {
+        None
+    } else {
+        Some(rebuilt)
+    }
+}
+
+fn rewrite_inbound_line(
+    line: &str,
+    doc_dir_segs: &[String],
+    rewrite_relative: bool,
+    ctx: &InboundRewriteCtx,
+) -> Option<String> {
+    let mut edits: Vec<(usize, usize, String)> = Vec::new();
+    let in_inline_code = |pos: usize| line[..pos].matches('`').count() % 2 == 1;
+
+    for c in wikilink_re().captures_iter(line) {
+        let full = c.get(0).unwrap();
+        if in_inline_code(full.start()) {
+            continue;
+        }
+        let inner = c.get(1).unwrap();
+        if let Some(next_inner) = shift_inbound_wikilink_inner(inner.as_str(), ctx) {
+            edits.push((inner.start(), inner.end(), next_inner));
+        }
+    }
+
+    if rewrite_relative {
+        for c in inline_link_re().captures_iter(line) {
+            let payload = c.get(1).unwrap();
+            if let Some((s, e)) = destination_range(payload.as_str()) {
+                let abs_s = payload.start() + s;
+                let abs_e = payload.start() + e;
+                if in_inline_code(abs_s) {
+                    continue;
+                }
+                let in_angle = abs_s > payload.start() && line.as_bytes().get(abs_s - 1) == Some(&b'<');
+                if let Some(next) = shift_inbound_relative_target(&line[abs_s..abs_e], in_angle, doc_dir_segs, ctx) {
+                    edits.push((abs_s, abs_e, next));
+                }
+            }
+        }
+        for re in [ref_def_re(), html_attr_re()] {
+            for c in re.captures_iter(line) {
+                let m = c.get(1).unwrap();
+                if in_inline_code(m.start()) {
+                    continue;
+                }
+                if let Some(next) = shift_inbound_relative_target(m.as_str(), false, doc_dir_segs, ctx) {
+                    edits.push((m.start(), m.end(), next));
+                }
+            }
+        }
+    }
+
+    if edits.is_empty() {
+        return None;
+    }
+    edits.sort_by_key(|(s, _, _)| *s);
+    let mut out = String::with_capacity(line.len());
+    let mut cursor = 0usize;
+    for (s, e, replacement) in edits {
+        if s < cursor {
+            continue;
+        }
+        out.push_str(&line[cursor..s]);
+        out.push_str(&replacement);
+        cursor = e;
+    }
+    out.push_str(&line[cursor..]);
+    Some(out)
+}
+
+fn rewrite_inbound_body(
+    body: &str,
+    doc_dir_segs: &[String],
+    rewrite_relative: bool,
+    ctx: &InboundRewriteCtx,
+) -> Option<String> {
+    let mut out = String::with_capacity(body.len());
+    let mut in_fence = false;
+    let mut changed = false;
+    for line in body.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            in_fence = !in_fence;
+            out.push_str(line);
+            continue;
+        }
+        if in_fence {
+            out.push_str(line);
+            continue;
+        }
+        match rewrite_inbound_line(line, doc_dir_segs, rewrite_relative, ctx) {
+            Some(next) => {
+                changed = true;
+                out.push_str(&next);
+            }
+            None => out.push_str(line),
+        }
+    }
+    if changed {
+        Some(out)
+    } else {
+        None
+    }
+}
+
+/// #571 — Walk all Markdown files in `ws_root` and update inbound wikilinks
+/// (`[[Note]]`, `[[folder/Note#Heading|Alias]]`, `![[img.png|300]]`) and
+/// relative Markdown / HTML / reference links pointing at `old_root` so they
+/// point at `new_root`. Returns the list of modified `.md` file paths on disk.
+fn relink_inbound_workspace_links(
+    ws_root: &Path,
+    old_root: &Path,
+    new_root: &Path,
+    extra_dir_pairs: &[(Vec<String>, Vec<String>)],
+) -> Vec<String> {
+    if !ws_root.is_dir() {
+        return Vec::new();
+    }
+    let ws_segs = abs_segments(ws_root);
+    let old_segs = abs_segments(old_root);
+    let new_segs = abs_segments(new_root);
+    if ws_segs.is_empty()
+        || !old_segs.starts_with(&ws_segs)
+        || !new_segs.starts_with(&ws_segs)
+        || old_segs == new_segs
+    {
+        return Vec::new();
+    }
+    let old_rel_segs = old_segs[ws_segs.len()..].to_vec();
+    let new_rel_segs = new_segs[ws_segs.len()..].to_vec();
+    if old_rel_segs.is_empty() || new_rel_segs.is_empty() {
+        return Vec::new();
+    }
+
+    let is_dir = new_root.is_dir();
+    let is_md_file = !is_dir && is_markdown_path(new_root);
+    let old_name = old_root
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let new_name = new_root
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let old_stem = strip_markdown_ext(&old_name).to_string();
+    let new_stem = strip_markdown_ext(&new_name).to_string();
+
+    const SKIP_DIRS: &[&str] = &[".git", "node_modules", "target", "dist"];
+    let old_name_lc = old_name.to_lowercase();
+    let mut md_files: Vec<std::path::PathBuf> = Vec::new();
+    let mut has_duplicate_non_md_name = false;
+    for entry in walkdir::WalkDir::new(ws_root)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            if e.file_type().is_dir() {
+                let name = e.file_name().to_string_lossy();
+                return !SKIP_DIRS.iter().any(|s| *s == name);
+            }
+            true
+        })
+        .filter_map(|e| e.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if is_markdown_path(path) {
+            md_files.push(path.to_path_buf());
+        } else if !is_dir
+            && !is_md_file
+            && !has_duplicate_non_md_name
+            && path != new_root
+            && entry.file_name().to_string_lossy().to_lowercase() == old_name_lc
+        {
+            has_duplicate_non_md_name = true;
+        }
+    }
+
+    // Only rewrite stem-only `[[OldStem]]` when no OTHER file in the workspace
+    // still carries that stem/filename (avoids clobbering ambiguous stems like
+    // multiple `README.md` notes in different folders).
+    let allow_stem_wikilink = !is_dir && old_name != new_name && {
+        if is_md_file {
+            let old_stem_lc = old_stem.to_lowercase();
+            !md_files.iter().any(|p| {
+                p != new_root
+                    && p.file_stem()
+                        .map(|s| s.to_string_lossy().to_lowercase() == old_stem_lc)
+                        .unwrap_or(false)
+            })
+        } else {
+            !has_duplicate_non_md_name
+        }
+    };
+
+    let ctx = InboundRewriteCtx {
+        old_segs: old_segs.clone(),
+        new_segs: new_segs.clone(),
+        old_rel_segs,
+        new_rel_segs,
+        is_dir,
+        is_md_file,
+        old_stem,
+        new_stem,
+        old_name,
+        new_name,
+        allow_stem_wikilink,
+        extra_dir_pairs: extra_dir_pairs.to_vec(),
+    };
+
+    let old_parent_segs = &old_segs[..old_segs.len().saturating_sub(1)];
+    let new_parent_segs = &new_segs[..new_segs.len().saturating_sub(1)];
+
+    let mut updated_paths: Vec<String> = Vec::new();
+    for file in md_files {
+        let Some(doc_parent) = file.parent() else {
+            continue;
+        };
+        let doc_segs = abs_segments(&file);
+        let doc_dir_segs = abs_segments(doc_parent);
+        // Inside a moved directory, relative links to sibling notes in the same
+        // moved subtree did not change, and outbound links were already shifted
+        // by `relink_moved_tree`. Same for a single note moved to a new parent.
+        let moved_across_dirs = (is_dir && doc_segs.starts_with(&new_segs))
+            || (!is_dir && doc_segs == new_segs && old_parent_segs != new_parent_segs);
+        let rewrite_relative = !moved_across_dirs;
+
+        let Ok(bytes) = fs::read(&file) else { continue };
+        // Every Markdown link `[...](...)`, reference def `[id]: ...`, or wikilink
+        // `[[...]]` contains `]` — skip files with no `]` before UTF-8 + line regexes.
+        if !bytes.contains(&b']') {
+            continue;
+        }
+        let Ok(body) = std::str::from_utf8(&bytes) else {
+            continue;
+        };
+        if let Some(next) = rewrite_inbound_body(body, &doc_dir_segs, rewrite_relative, &ctx) {
+            if let Err(e) = fs::write(&file, next) {
+                eprintln!("[relink_inbound] write-back failed for {}: {e}", file.display());
+            } else {
+                updated_paths.push(file.to_string_lossy().to_string());
+            }
+        }
+    }
+    updated_paths
 }
 
 /// Every folder under `root`, as vault-relative slash-separated paths, for the
@@ -2101,6 +2768,18 @@ async fn resolve_gitee_asset_url(
     None
 }
 
+/// Set by `cancel_update_download` while a download is in flight. Reset at the
+/// start of every download, so a cancelled run never poisons the next one.
+static UPDATE_CANCELLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Stop the in-flight installer download. The partial file is discarded and
+/// `download_and_install_update` resolves with an `Err("cancelled")` the
+/// frontend recognises instead of falling back to the release page.
+#[tauri::command]
+pub fn cancel_update_download() {
+    UPDATE_CANCELLED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
 /// Download the platform installer for `version` (switching to Gitee automatically
 /// when the visitor is in China, with cross-mirror fallback between Gitee and GitHub)
 /// and launch the installer directly.
@@ -2112,7 +2791,10 @@ pub async fn download_and_install_update(
 ) -> Result<String, String> {
     use futures_util::StreamExt;
     use std::io::Write;
+    use std::sync::atomic::Ordering;
     use tauri::Emitter;
+
+    UPDATE_CANCELLED.store(false, Ordering::SeqCst);
 
     let clean_ver = version.trim().trim_start_matches('v').to_string();
     if clean_ver.is_empty() {
@@ -2165,6 +2847,9 @@ pub async fn download_and_install_update(
     let mut downloaded_ok = false;
 
     for (source, url) in candidates {
+        if UPDATE_CANCELLED.load(Ordering::SeqCst) {
+            return Err("cancelled".to_string());
+        }
         let resp = match client.get(&url).send().await {
             Ok(r) => r,
             Err(e) => {
@@ -2199,8 +2884,13 @@ pub async fn download_and_install_update(
             .unwrap_or_else(std::time::Instant::now);
         let mut stream = resp.bytes_stream();
         let mut stream_err: Option<String> = None;
+        let mut cancelled_here = false;
 
         while let Some(chunk_res) = stream.next().await {
+            if UPDATE_CANCELLED.load(Ordering::SeqCst) {
+                cancelled_here = true;
+                break;
+            }
             match chunk_res {
                 Ok(chunk) => {
                     if let Err(e) = file.write_all(&chunk) {
@@ -2234,6 +2924,11 @@ pub async fn download_and_install_update(
                     break;
                 }
             }
+        }
+
+        if cancelled_here {
+            let _ = fs::remove_file(&part_path);
+            return Err("cancelled".to_string());
         }
 
         if let Some(err) = stream_err {

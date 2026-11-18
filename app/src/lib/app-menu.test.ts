@@ -120,7 +120,7 @@ test('C1 section 四 / 六 / Part-1 commands all have a menu entry', () => {
   const required = [
     // File
     'file.new', 'file.newText', 'file.newInFolder', 'window.new', 'file.open', 'file.openFolder',
-    'daily.openToday', 'file.save', 'file.saveAs', 'file.autoSave', 'file.import', 'export.html',
+    'daily.openToday', 'file.save', 'file.saveAs', 'file.saveAll', 'file.autoSave', 'file.import', 'export.html',
     'export.docx', 'export.pdfPrint', 'export.pdf', 'export.image', 'export.copyHtml', 'export.copyMd',
     'file.print', 'inbox.toggle', 'file.openExternal', 'settings.open', 'file.closeTab', 'tab.reopenClosed', 'file.exit',
     // Edit
@@ -286,7 +286,7 @@ test('menu coverage: the new submenus hold what they should', () => {
   assert.ok(itemIds(submenu(m, 'theme')!.items).includes('theme.customCss'));
   // Shortcuts survive the move into submenus.
   assert.equal(itemShortcut(find(m, 'daily.openToday'), ctx()), 'Ctrl+D');
-  assert.equal(itemShortcut(find(m, 'inbox.toggle'), ctx()), 'Ctrl+E');
+  assert.equal(itemShortcut(find(m, 'inbox.toggle'), ctx()), '');
   assert.equal(itemShortcut(find(m, 'view.toggleInspector'), ctx()), 'Ctrl+Shift+I');
   assert.equal(find(m, 'fold.level2').label, 'Show Down to Level 2');
 });

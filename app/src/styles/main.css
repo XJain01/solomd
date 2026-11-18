@@ -312,6 +312,29 @@
   --syn-type: #8be9fd; --syn-property: #50fa7b; --syn-operator: #ff79c6;
 }
 
+/* ---- Lucius (Eye-Care / 护眼) (#358) ---- */
+:root[data-theme="lucius"] {
+  color-scheme: light;
+  --bg: #eef3eb;
+  --bg-elev: #e3ece0;
+  --bg-hover: rgba(40, 51, 40, 0.055);
+  --bg-active: rgba(40, 51, 40, 0.095);
+  --border: #cfd9ca;
+  --text: #283328;
+  --text-muted: #526352;
+  --text-faint: #7c8f7c;
+  --accent: #3a7d44;
+  --accent-fg: #ffffff;
+  --md-h1: #1f4e2c; --md-h2: #245330; --md-h3: #283328;
+  --md-h4: #374737; --md-h5: #4a5a4a; --md-h6: #526352;
+  --md-strong: #1e291e; --md-em: #283328; --md-link: #2b6cb0;
+  --md-url: #526352; --md-code: #2e6f40; --md-code-bg: #e3ece0;
+  --md-quote: #526352; --md-list: #3a7d44; --md-hr: #cfd9ca;
+  --syn-keyword: #2e6f40; --syn-string: #3b7a57; --syn-number: #8c5a2b;
+  --syn-comment: #7c8f7c; --syn-function: #2b5b84; --syn-variable: #283328;
+  --syn-type: #7a5c2e; --syn-property: #2b5b84; --syn-operator: #2e6f40;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -505,9 +528,12 @@ button:disabled {
      to become the safe area instead, or a full-height panel puts its close
      button under the notch and its footer under the home indicator — measured
      on an iOS simulator: panel top 16 against a 62px inset, bottom 940 against
-     a 956px viewport with a 34px inset. */
-  padding: calc(env(safe-area-inset-top) + 8px) calc(env(safe-area-inset-right) + 8px)
-    calc(env(safe-area-inset-bottom) + 8px) calc(env(safe-area-inset-left) + 8px);
+     a 956px viewport with a 34px inset. Android WebView reports env() as 0,
+     so include --android-safe-top/bottom (#153). */
+  padding: calc(max(env(safe-area-inset-top, 0px), var(--android-safe-top, 0px)) + 8px)
+    calc(env(safe-area-inset-right, 0px) + 8px)
+    calc(max(env(safe-area-inset-bottom, 0px), var(--android-safe-bottom, 0px)) + 8px)
+    calc(env(safe-area-inset-left, 0px) + 8px);
 }
 :root.narrow-viewport .ds-modal__panel {
   width: 100% !important;
@@ -560,7 +586,7 @@ button:disabled {
    screen a thumb can actually reach. */
 :root.narrow-viewport .reading-view__controls {
   top: auto;
-  bottom: max(16px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+  bottom: max(16px, calc(max(env(safe-area-inset-bottom, 0px), var(--android-safe-bottom, 0px)) + 8px));
   right: max(16px, calc(env(safe-area-inset-right, 0px) + 8px));
 }
 /* Both the window buttons and the plain close button — the latter is the one
@@ -800,15 +826,26 @@ details.md-callout > p,
   color: var(--accent);
   text-decoration: underline;
 }
-/* #347 — the text PDF's table-of-contents page: a titled page rather than the
-   on-screen card, with a dotted leader to each entry's page number
+/* #347 / #566 — the PDF's table-of-contents page: a titled page rather than
+   the on-screen card, with a dotted leader to each entry's page number
    (lib/print-pages.ts fills the numbers; an entry without one drops the
    leader). */
-.solomd-print-content > .md-toc:first-child {
+.solomd-print-content .md-toc {
   border: none;
   background: transparent;
   padding: 0;
   margin: 0;
+}
+.solomd-print-content > h1:first-child:has(+ .md-toc),
+.solomd-print-content h1.pdf-doc-title {
+  text-align: center;
+  border-bottom: none !important;
+  padding-bottom: 0;
+}
+.solomd-print-content > .md-toc:first-child + hr,
+.solomd-print-content > h1:first-child + .md-toc + hr,
+.solomd-print-content hr.pdf-toc-hr {
+  display: none !important;
 }
 .solomd-print-content .md-toc__title {
   font-size: 1.6em;
@@ -838,7 +875,7 @@ details.md-callout > p,
 }
 
 mark {
-  background: rgba(255, 159, 64, 0.28);
+  background: var(--mark-bg, rgba(255, 212, 0, 0.52));
   color: inherit;
   padding: 0 0.18em;
   border-radius: 2px;
@@ -947,10 +984,15 @@ div.mermaidTooltip {
   body.solomd-printing .md-toc {
     break-inside: avoid-page;
     background: transparent;
+    border: none;
+    padding: 0;
   }
-  /* #347 — a TOC at the top of the document (Settings → PDF "table of
-   * contents", or a leading [TOC]) is a page of its own. */
-  body.solomd-printing .solomd-print-content > .md-toc:first-child {
+  /* #347 / #566 — a TOC at the top of the document (Settings → PDF "table of
+   * contents", a leading [TOC], or H1 + [TOC] in merged book export) is a page
+   * of its own. */
+  body.solomd-printing .solomd-print-content > .md-toc:first-child,
+  body.solomd-printing .solomd-print-content > h1:first-child + .md-toc,
+  body.solomd-printing .solomd-print-content .md-toc.md-toc--lead {
     break-after: page;
     page-break-after: always;
   }

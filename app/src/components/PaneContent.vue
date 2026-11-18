@@ -8,6 +8,7 @@ import { useTilesStore } from '../stores/tiles';
 import { useTabsStore } from '../stores/tabs';
 import type { Tab } from '../types';
 import { isWindowsEditorRuntime, shouldUsePlainWindowsEditor } from '../lib/platform';
+import { createLaunchCursorRestore } from '../lib/launch-cursor-restore';
 import {
   previewScrollMemory,
   tabCaretMemory,
@@ -61,13 +62,17 @@ const previewSource = computed(() => {
 });
 
 const isFocused = computed(() => tiles.focusedPaneId === props.paneId);
-const windowsEditorRuntime = isWindowsEditorRuntime();
 // Preserve CodeMirror history/caret on macOS and Linux. Only Windows needs a
 // remount because toggling Vim or the editor engine changes the editor
 // implementation itself.
 const editorImplementationKey = computed(() => {
-  if (!windowsEditorRuntime) return `${props.paneId}:codemirror`;
-  const plain = shouldUsePlainWindowsEditor(true, settings.vimMode, settings.windowsEditorEngine);
+  const engine = settings.windowsEditorEngine;
+  const vim = settings.vimMode;
+  const plain = shouldUsePlainWindowsEditor(
+    isWindowsEditorRuntime(),
+    vim,
+    engine,
+  );
   return `${props.paneId}:${plain ? 'plain' : 'codemirror'}`;
 });
 
@@ -84,26 +89,21 @@ function onCursor(line: number, col: number) {
 // editor (preview-only mode keeps it pending until an editor shows it).
 // `setCaret(line, col)` is used when the editor exposes it; otherwise the
 // existing `gotoLine` lands on the right line (column 1).
-function restoreLaunchCursor() {
-  const tab = props.tab;
-  if (!tab || !isFocused.value || !showEditor.value) return;
-  const tabId = tab.id;
-  setTimeout(() => {
-    const ed = editorRef.value as unknown as {
+const launchCursorRestore = createLaunchCursorRestore({
+  getTabId: () => props.tab?.id,
+  canRestore: () => isFocused.value && showEditor.value && settings.viewMode !== 'reading',
+  getEditor: () =>
+    editorRef.value as unknown as {
       setCaret?: (line: number, col: number) => void;
       gotoLine?: (line: number) => void;
-    } | null;
-    if (!ed || props.tab?.id !== tabId) return;
-    const c = tabs.takeLaunchCursor(tabId);
-    if (!c) return;
-    if ((c.line <= 1 && c.col <= 1) || tabCaretMemory.has(tabId) || tabTopLineMemory.has(tabId)) {
-      return;
-    }
-    if (ed.setCaret) ed.setCaret(c.line, c.col);
-    else ed.gotoLine?.(c.line);
-  }, 150);
-}
-watch(() => [props.tab?.id, isFocused.value, showEditor.value], restoreLaunchCursor);
+    } | null,
+  takeCursor: (tabId) => tabs.takeLaunchCursor(tabId),
+  hasViewportMemory: (tabId) => tabCaretMemory.has(tabId) || tabTopLineMemory.has(tabId),
+});
+watch(
+  () => [props.tab?.id, isFocused.value, showEditor.value, settings.viewMode],
+  launchCursorRestore.schedule,
+);
 
 function onSelection(text: string) {
   if (isFocused.value) {
@@ -133,6 +133,79 @@ const isSplit = computed(
   () => showEditor.value && showPreview.value,
 );
 const contentEl = ref<HTMLElement | null>(null);
+
+// #377 — Split mode hover line sync highlight between editor and preview.
+const editorHoverBand = ref<{ top: number; height: number } | null>(null);
+let lastHoveredPreviewEl: HTMLElement | null = null;
+
+function clearSplitHover() {
+  editorHoverBand.value = null;
+  if (lastHoveredPreviewEl) {
+    lastHoveredPreviewEl.classList.remove('split-hover-block');
+    lastHoveredPreviewEl = null;
+  }
+}
+
+function onEditorPointerMove(e: PointerEvent) {
+  if (!isSplit.value) return;
+  const ed = editorRef.value as unknown as {
+    lineAtCoords?: (x: number, y: number) => number | null;
+    lineBandRect?: (fromLine: number, toLine?: number) => { top: number; height: number } | null;
+  } | null;
+  if (!ed?.lineAtCoords || !ed.lineBandRect) return;
+  const line = ed.lineAtCoords(e.clientX, e.clientY);
+  if (!line) {
+    clearSplitHover();
+    return;
+  }
+  editorHoverBand.value = ed.lineBandRect(line, line);
+  const paneEl = contentEl.value;
+  const preview = paneEl?.querySelector('.pane--preview .preview-host') as HTMLElement | null;
+  if (!preview) return;
+  const previewLines = getPreviewElementsByLine(preview);
+  const idx = findAnchorIndex(previewLines, line);
+  const targetEl = idx >= 0 ? previewLines[idx].el : null;
+  if (targetEl !== lastHoveredPreviewEl) {
+    lastHoveredPreviewEl?.classList.remove('split-hover-block');
+    targetEl?.classList.add('split-hover-block');
+    lastHoveredPreviewEl = targetEl;
+  }
+}
+
+function onPreviewPointerMove(e: PointerEvent) {
+  if (!isSplit.value) return;
+  const target = (e.target as HTMLElement | null)?.closest?.('[data-source-line]') as HTMLElement | null;
+  if (!target) {
+    clearSplitHover();
+    return;
+  }
+  if (target !== lastHoveredPreviewEl) {
+    lastHoveredPreviewEl?.classList.remove('split-hover-block');
+    target.classList.add('split-hover-block');
+    lastHoveredPreviewEl = target;
+  }
+  const startLine = Number(target.getAttribute('data-source-line') || 0);
+  if (!startLine) {
+    editorHoverBand.value = null;
+    return;
+  }
+  const paneEl = contentEl.value;
+  const preview = paneEl?.querySelector('.pane--preview .preview-host') as HTMLElement | null;
+  let endLine = startLine;
+  if (preview) {
+    const previewLines = getPreviewElementsByLine(preview);
+    const next = previewLines.find((item) => item.line > startLine);
+    if (next) endLine = Math.max(startLine, next.line - 1);
+  }
+  const ed = editorRef.value as unknown as {
+    lineBandRect?: (fromLine: number, toLine?: number) => { top: number; height: number } | null;
+  } | null;
+  editorHoverBand.value = ed?.lineBandRect?.(startLine, endLine) ?? null;
+}
+
+watch(isSplit, (split) => {
+  if (!split) clearSplitHover();
+});
 // Live value while dragging; committed (and persisted) on pointerup so a drag
 // writes localStorage once instead of on every pointermove.
 const dragRatio = ref<number | null>(null);
@@ -608,7 +681,7 @@ onMounted(() => {
     }
   }, 110);
   setTimeout(bindScrollSync, 300);
-  restoreLaunchCursor();
+  launchCursorRestore.schedule();
   window.addEventListener('solomd:outline-goto', onOutlineGotoEvent);
   window.addEventListener('solomd:insert-markdown', onInsertMarkdownEvent);
   window.addEventListener('solomd:insert-image-path', onInsertImagePathEvent);
@@ -622,6 +695,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  launchCursorRestore.cancel();
   syncEditorScroll?.();
   syncPreviewScroll?.();
   resizeObserver?.disconnect();
@@ -723,6 +797,7 @@ function onFoldEvent(e: Event) {
 }
 
 function onPreviewSearchEvent(e: Event) {
+  if (settings.viewMode === 'reading') return;
   const { paneId } = (e as CustomEvent).detail;
   if (paneId !== props.paneId) return;
   (previewRef.value as unknown as { openSearch?: () => void } | null)?.openSearch?.();
@@ -741,7 +816,23 @@ function onPreviewSearchEvent(e: Event) {
       'pane-content--distinct': settings.distinctSplitPanes && showEditor && showPreview,
     }"
   >
-    <div class="pane pane--editor" v-if="tab" v-show="showEditor" :style="editorPaneStyle">
+    <div
+      class="pane pane--editor"
+      v-if="tab"
+      v-show="showEditor"
+      :style="editorPaneStyle"
+      @pointermove="onEditorPointerMove"
+      @pointerleave="clearSplitHover"
+      @pointerdown.capture="launchCursorRestore.userIntent"
+      @touchstart.capture.passive="launchCursorRestore.userIntent"
+      @keydown.capture="launchCursorRestore.userIntent"
+      @wheel.capture.passive="launchCursorRestore.userIntent"
+    >
+      <div
+        v-if="isSplit && editorHoverBand"
+        class="split-hover-band"
+        :style="{ top: `${editorHoverBand.top}px`, height: `${editorHoverBand.height}px` }"
+      />
       <Editor
         :key="editorImplementationKey"
         ref="editorRef"
@@ -770,7 +861,12 @@ function onPreviewSearchEvent(e: Event) {
       @dblclick="resetSplitRatio"
       @keydown="onDividerKeydown"
     />
-    <div class="pane pane--preview" v-if="showPreview && tab">
+    <div
+      class="pane pane--preview"
+      v-if="showPreview && tab"
+      @pointermove="onPreviewPointerMove"
+      @pointerleave="clearSplitHover"
+    >
       <Preview
         ref="previewRef"
         :source="previewSource"
@@ -796,6 +892,23 @@ function onPreviewSearchEvent(e: Event) {
   flex: 1;
   min-width: 0;
   height: 100%;
+  position: relative;
+}
+.split-hover-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 2;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  transition: top 0.05s ease-out, height 0.05s ease-out;
+}
+.pane--preview :deep(.split-hover-block) {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-radius: 4px;
+  box-shadow: -3px 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+  transition: background 0.1s ease-out;
 }
 .pane--editor + .pane--preview {
   border-left: var(--bd-hair);

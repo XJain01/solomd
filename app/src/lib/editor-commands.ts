@@ -15,6 +15,12 @@ export type EditorCommand =
   | 'deleteWord'
   | 'selectLine'
   | 'jumpToSelection'
+  | 'selectNextOccurrence'
+  | 'selectAllOccurrences'
+  | 'addCursorAbove'
+  | 'addCursorBelow'
+  | 'cursorBack'
+  | 'cursorForward'
   | 'headingPromote'
   | 'headingDemote'
   | 'headingParagraph'
@@ -25,6 +31,12 @@ export const EDITOR_COMMANDS: EditorCommand[] = [
   'deleteWord',
   'selectLine',
   'jumpToSelection',
+  'selectNextOccurrence',
+  'selectAllOccurrences',
+  'addCursorAbove',
+  'addCursorBelow',
+  'cursorBack',
+  'cursorForward',
   'headingPromote',
   'headingDemote',
   'headingParagraph',

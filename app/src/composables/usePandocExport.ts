@@ -29,6 +29,8 @@ import { useI18n } from '../i18n';
 import { useSettingsStore } from '../stores/settings';
 import { exportDefaultPath } from '../lib/export-paths';
 import { track } from '../lib/telemetry';
+import { pandocResourcePaths } from '../lib/pandoc-resource-paths';
+import { useWorkspaceStore } from '../stores/workspace';
 import {
   parseBibFile,
   parseCslJson,
@@ -124,6 +126,7 @@ function detectCitationFormat(path: string): 'bib' | 'csl-json' {
 export function usePandocExport() {
   const tabs = useTabsStore();
   const toasts = useToastsStore();
+  const workspace = useWorkspaceStore();
   const { t } = useI18n();
   const settings = useSettingsStore();
 
@@ -181,6 +184,19 @@ export function usePandocExport() {
     activeContent?: string,
     opts: ExportOptions = {}
   ): Promise<void> {
+    if (
+      format !== 'custom' &&
+      activeContent === undefined &&
+      typeof window !== 'undefined' &&
+      !(window as unknown as { __solomdSavePathOverride?: string }).__solomdSavePathOverride
+    ) {
+      window.dispatchEvent(
+        new CustomEvent('solomd:open-custom-export', {
+          detail: { scope: 'current', format },
+        }),
+      );
+      return;
+    }
     const ctx = activeContext();
     if (!ctx) return;
     // Gitee IJXS8V — run the same leniency preprocessors the preview uses
@@ -194,7 +210,8 @@ export function usePandocExport() {
     // for the table-delimiter repair, the inline-HTML unwrap, and opt-in
     // heading numbers — all of which the user can see on screen and would
     // reasonably expect in a .docx.
-    const content = preprocessMarkdown(activeContent ?? ctx.content);
+    const { buildPandocFromArg, prepareMarkdownForPandoc } = await import('../lib/pandoc-markdown');
+    const content = prepareMarkdownForPandoc(preprocessMarkdown(activeContent ?? ctx.content));
 
     // Detect pandoc up front so the user gets a clear "install pandoc"
     // error before we open the save dialog.
@@ -223,10 +240,11 @@ export function usePandocExport() {
       extraArgs.push(...spec.extraArgs);
     }
     if (opts.extraArgs) extraArgs.push(...opts.extraArgs);
-    // #141 — keep pandoc's line-break semantics in lockstep with the in-app
-    // preview: with hard breaks on, a single newline is a real line break.
-    if (settings.markdownHardBreaks) {
-      extraArgs.push('--from=markdown+hard_line_breaks');
+    // #141 & #591 — keep pandoc's line-break and table semantics in lockstep
+    // with SoloMD's CommonMark/GFM preview unless the caller specified `--from`/`-f`.
+    const hasCustomFrom = extraArgs.some((a) => a === '-f' || a.startsWith('--from=') || a === '--from');
+    if (!hasCustomFrom) {
+      extraArgs.push(buildPandocFromArg(settings.markdownHardBreaks));
     }
 
     const filters =
@@ -245,15 +263,27 @@ export function usePandocExport() {
     track('file_exported', { format: `pandoc_${format}` });
     const tid = toasts.info(t('toast.pandocExporting', { format }), 0);
     try {
+      let preparedInput = content;
+      if (format === 'epub' || format === 'odt' || format === 'rtf') {
+        const { renderMermaidFencesInMarkdown } = await import('../lib/diagram-export');
+        preparedInput = await renderMermaidFencesInMarkdown(preparedInput);
+      }
+      let cssContent: string | null = null;
+      if (format === 'epub') {
+        const { SOLOMD_EPUB_CSS } = await import('../lib/epub-style');
+        cssContent = SOLOMD_EPUB_CSS;
+      }
       await invoke('pandoc_export', {
         args: {
-          input_markdown: content,
+          input_markdown: preparedInput,
           format,
           output_path: outputPath,
           bibliography: bibliography ?? null,
           csl: csl ?? null,
           template: opts.template ?? null,
           extra_args: extraArgs,
+          resource_paths: pandocResourcePaths(ctx.filePath, workspace.currentFolder),
+          css_content: cssContent,
         },
       });
       toasts.dismiss(tid);

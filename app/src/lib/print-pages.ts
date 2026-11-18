@@ -99,10 +99,25 @@ export function decoratePrintToc(content: HTMLElement, title: string): HTMLEleme
   const nav = content.querySelector<HTMLElement>('nav.md-toc');
   if (!nav || nav.dataset.printDecorated) return nav;
   nav.dataset.printDecorated = '1';
-  const heading = document.createElement('div');
-  heading.className = 'md-toc__title';
-  heading.textContent = title;
-  nav.prepend(heading);
+  const prev = nav.previousElementSibling as HTMLElement | null;
+  if (prev?.tagName === 'H1') {
+    prev.classList.add('pdf-doc-title');
+  } else if (title) {
+    const heading = document.createElement('div');
+    heading.className = 'md-toc__title';
+    heading.textContent = title;
+    nav.prepend(heading);
+  }
+  if (
+    nav === content.firstElementChild ||
+    (prev === content.firstElementChild && prev?.tagName === 'H1')
+  ) {
+    nav.classList.add('md-toc--lead');
+    const next = nav.nextElementSibling as HTMLElement | null;
+    if (next?.tagName === 'HR') {
+      next.classList.add('pdf-toc-hr');
+    }
+  }
   for (const link of Array.from(nav.querySelectorAll<HTMLAnchorElement>('a.md-toc__link'))) {
     const text = document.createElement('span');
     text.className = 'md-toc__text';
@@ -142,6 +157,28 @@ export function fillTocPageNumbers(
     slot.textContent = target && pageOf ? String(pageOf(target)) : '';
     link.classList.toggle('md-toc__link--paged', !!slot.textContent);
   }
+}
+
+/**
+ * #515 — Collect heading entries `[level, title, pageNumber]` from the print
+ * overlay so native PDF generation can attach a PDF document outline (bookmarks).
+ */
+export function collectPrintOutline(
+  content: HTMLElement,
+  pageOf: ((el: Element) => number) | null,
+): Array<[number, string, number]> {
+  const headings = Array.from(
+    content.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'),
+  ).filter((el) => !el.closest('.md-toc'));
+  const entries: Array<[number, string, number]> = [];
+  for (const el of headings) {
+    const level = Math.max(1, Math.min(6, Number(el.tagName.slice(1)) || 1));
+    const title = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!title) continue;
+    const page = pageOf ? Math.max(1, pageOf(el)) : 1;
+    entries.push([level, title, page]);
+  }
+  return entries;
 }
 
 export interface PrintPagination {

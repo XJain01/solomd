@@ -19,3 +19,10 @@ test('OpenCode Go tracks the live gateway catalogue', () => {
     ['minimax-m3.1-flash', 'minimax-m3'],
   );
 });
+
+test('#481: Cheaper Inference is configured as an OpenAI-compatible aggregator gateway', () => {
+  const provider = providerById('cheaper-inference')!;
+  assert.equal(provider.apiFormat, 'openai');
+  assert.equal(provider.defaultBaseUrl, 'https://api.cheaperinference.com/v1');
+  assert.equal(provider.signupUrl, 'https://cheaperinference.com/markets');
+});

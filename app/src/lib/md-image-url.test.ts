@@ -6,10 +6,13 @@ import {
   encodeImageDestination,
   extractImageReferenceDefinitions,
   findMarkdownImagesInLine,
+  isStandaloneImageLine,
   markdownImage,
   parseImageAltSize,
+  parseImageEqSizeToken,
   resizeMarkdownImageLine,
 } from './md-image-url.ts';
+import { renderMarkdown } from './markdown.ts';
 
 const md = new MarkdownIt();
 const srcOf = (markdown: string): string | null => {
@@ -89,6 +92,31 @@ test('#446: parseImageAltSize parses pipe width/height in alt text', () => {
   });
 });
 
+test('#499: height-only pipe size leaves the width automatic', () => {
+  assert.deepEqual(parseImageAltSize('screenshot|x250'), {
+    alt: 'screenshot',
+    width: null,
+    height: '250px',
+  });
+  assert.deepEqual(parseImageAltSize('|x250'), {
+    alt: '',
+    width: null,
+    height: '250px',
+  });
+  assert.equal(
+    resizeMarkdownImageLine('![photo](_assets/a.png)', 'x250'),
+    '![photo|x250](_assets/a.png)',
+  );
+  assert.equal(
+    resizeMarkdownImageLine('![photo|300](_assets/a.png)', '450x250'),
+    '![photo|450x250](_assets/a.png)',
+  );
+  assert.equal(
+    resizeMarkdownImageLine('<img src="a.png" alt="pic">', 'x250'),
+    '<img src="a.png" alt="pic" height="250" style="height: 250px;">',
+  );
+});
+
 test('#446: resizeMarkdownImageLine updates Markdown and HTML image lines', () => {
   assert.equal(
     resizeMarkdownImageLine('![photo](_assets/a.png)', '50%'),
@@ -140,3 +168,102 @@ test('#506: findMarkdownImagesInLine parses complex Markdown image forms', () =>
   assert.deepEqual(findMarkdownImagesInLine('`![not-an-image](https://example.com/x.png)`'), []);
 });
 
+
+// ---- #561: standalone image lines (live mode keeps the source visible) ----
+test('isStandaloneImageLine: a lone image line, with or without padding', () => {
+  assert.equal(isStandaloneImageLine('![](assets/pic.png)'), true);
+  assert.equal(isStandaloneImageLine('   ![alt](<a b.png>)   '), true);
+  assert.equal(isStandaloneImageLine('[![alt](i.png)](https://example.com)'), true);
+  assert.equal(isStandaloneImageLine('![[图1] 描述](pic.png)'), true);
+});
+
+test('isStandaloneImageLine: anything with text around it is not standalone', () => {
+  assert.equal(isStandaloneImageLine('see ![](pic.png)'), false);
+  assert.equal(isStandaloneImageLine('![](pic.png) and more'), false);
+  assert.equal(isStandaloneImageLine('- ![](pic.png)'), false);
+  assert.equal(isStandaloneImageLine('> ![](pic.png)'), false);
+  assert.equal(isStandaloneImageLine('![](a.png) ![](b.png)'), false);
+  assert.equal(isStandaloneImageLine('![](a.png)\n![](b.png)'), false);
+  assert.equal(isStandaloneImageLine('`![](a.png)`'), false);
+  assert.equal(isStandaloneImageLine('![](a.png'), false);
+  assert.equal(isStandaloneImageLine('plain text'), false);
+});
+
+test('isStandaloneImageLine: reference-style image resolves through the ref map', () => {
+  const refs = new Map([['logo', 'assets/logo.png']]);
+  assert.equal(isStandaloneImageLine('![alt][logo]', refs), true);
+  assert.equal(isStandaloneImageLine('![alt][logo]'), false);
+});
+
+// ---- #379: Markdown `=WxH` / `=Wx` / `=xH` & Obsidian `![[img.png|300]]` ----
+test('#379: parseImageEqSizeToken parses =WxH, =Wx, =xH, =W, =N%', () => {
+  assert.deepEqual(parseImageEqSizeToken('=300x200'), { width: '300px', height: '200px' });
+  assert.deepEqual(parseImageEqSizeToken('=300x'), { width: '300px', height: null });
+  assert.deepEqual(parseImageEqSizeToken('=x200'), { width: null, height: '200px' });
+  assert.deepEqual(parseImageEqSizeToken('=300'), { width: '300px', height: null });
+  assert.deepEqual(parseImageEqSizeToken('=50%'), { width: '50%', height: null });
+  assert.equal(parseImageEqSizeToken('300x200'), null);
+  assert.equal(parseImageEqSizeToken('=x'), null);
+});
+
+test('#379: findMarkdownImagesInLine & renderMarkdown support =WxH and ![[img|size]]', () => {
+  const s1 = findMarkdownImagesInLine('![shot](_assets/1.png =300x200)');
+  assert.equal(s1.length, 1);
+  assert.equal(s1[0].src, '_assets/1.png');
+  assert.equal(s1[0].alt, 'shot');
+  assert.equal(s1[0].width, '300px');
+  assert.equal(s1[0].height, '200px');
+
+  const s2 = findMarkdownImagesInLine('![](_assets/my pic.png =300x)');
+  assert.equal(s2.length, 1);
+  assert.equal(s2[0].src, '_assets/my pic.png');
+  assert.equal(s2[0].width, '300px');
+  assert.equal(s2[0].height, undefined);
+
+  const s3 = findMarkdownImagesInLine('![](_assets/1.png "Title" =x200)');
+  assert.equal(s3.length, 1);
+  assert.equal(s3[0].src, '_assets/1.png');
+  assert.equal(s3[0].width, undefined);
+  assert.equal(s3[0].height, '200px');
+
+  const s4 = findMarkdownImagesInLine('![[folder/pic.png|caption|400x250]]');
+  assert.equal(s4.length, 1);
+  assert.equal(s4[0].src, 'folder/pic.png');
+  assert.equal(parseImageAltSize(s4[0].alt).alt, 'caption');
+  assert.equal(s4[0].width, '400px');
+  assert.equal(s4[0].height, '250px');
+
+  // Non-image wikilinks/embeds are not parsed as images
+  assert.deepEqual(findMarkdownImagesInLine('[[folder/Note]]'), []);
+  assert.deepEqual(findMarkdownImagesInLine('![[folder/Note.md]]'), []);
+
+  const htmlEq = renderMarkdown('![diagram](_assets/pic.png =300x200)');
+  assert.match(htmlEq, /<img\b[^>]*width="300"[^>]*height="200"/);
+  assert.match(htmlEq, /width:\s*300px;\s*height:\s*200px;/);
+
+  const htmlSpacedEq = renderMarkdown('![](_assets/my pic.png =300x)');
+  assert.match(htmlSpacedEq, /<img\b[^>]*width="300"/);
+  assert.doesNotMatch(htmlSpacedEq, /height="/);
+
+  const htmlEmbed = renderMarkdown('![[pic.png|320]]');
+  assert.match(htmlEmbed, /<img\b[^>]*src="pic\.png"[^>]*width="320"/);
+});
+
+test('#379: resizeMarkdownImageLine preserves =WxH and ![[...]] syntax styles', () => {
+  assert.equal(
+    resizeMarkdownImageLine('![photo](_assets/a.png =300x200)', '50%'),
+    '![photo](_assets/a.png =50%)',
+  );
+  assert.equal(
+    resizeMarkdownImageLine('![photo](_assets/a.png =300x200)', '100%'),
+    '![photo](_assets/a.png)',
+  );
+  assert.equal(
+    resizeMarkdownImageLine('![[pic.png|300]]', '50%'),
+    '![[pic.png|50%]]',
+  );
+  assert.equal(
+    resizeMarkdownImageLine('![[pic.png|caption|300]]', '100%'),
+    '![[pic.png|caption]]',
+  );
+});

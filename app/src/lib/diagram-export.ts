@@ -16,12 +16,8 @@
  * the Preview pane uses, so the page still shows it wherever that server is
  * reachable.
  */
-import { initMermaid } from './mermaid-lazy';
+import { renderMermaidCached } from './mermaid-lazy';
 import { isPlantumlLang, plantumlSvgUrl } from './plantuml';
-
-// Ids must be unique per render across the whole session — mermaid keys
-// internal state off them and reusing one yields an empty diagram.
-let exportMermaidId = 0;
 
 export interface DiagramExportOptions {
   /** PlantUML server, only when the user has turned PlantUML on. */
@@ -48,21 +44,18 @@ export async function inlineDiagramsInHtml(
   if (hasMermaid) {
     const blocks = Array.from(root.querySelectorAll('pre > code.language-mermaid'));
     if (blocks.length) {
-      // The exported page is always the light paper palette.
-      const mermaid = await initMermaid({
-        startOnLoad: false,
-        securityLevel: 'strict',
-        theme: 'default',
-      });
+      // The exported page is always the light paper palette. #522 — the
+      // shared queue serialises these with anything the preview is doing.
       for (const code of blocks) {
         const pre = code.parentElement;
         if (!pre) continue;
         const source = (code.textContent || '').trim();
         try {
-          const { svg } = await mermaid.render(`export-mmd-${++exportMermaidId}`, source);
+          const result = await renderMermaidCached('default', source);
+          if (!result.svg) throw new Error(result.error || 'unknown error');
           const wrap = document.createElement('div');
           wrap.className = 'mermaid-block';
-          wrap.innerHTML = svg;
+          wrap.innerHTML = result.svg;
           pre.replaceWith(wrap);
         } catch (e) {
           // A broken diagram must not abort the export: keep the source and
@@ -120,13 +113,9 @@ export interface DiagramPng {
  */
 export async function mermaidToPng(source: string): Promise<DiagramPng | null> {
   try {
-    const mermaid = await initMermaid({
-      startOnLoad: false,
-      securityLevel: 'strict',
-      theme: 'default',
-    });
-    const { svg } = await mermaid.render(`export-mmd-${++exportMermaidId}`, source.trim());
-    return await svgToPng(svg);
+    const result = await renderMermaidCached('default', source.trim());
+    if (!result.svg) return null;
+    return await svgToPng(result.svg);
   } catch (e) {
     console.warn('[export] mermaid → png failed', e);
     return null;
@@ -233,4 +222,94 @@ function foreignObjectsToText(root: Element) {
     }
     fo.replaceWith(g);
   }
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(bytes).toString('base64');
+  }
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const sub = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    binary += String.fromCharCode(...sub);
+  }
+  return btoa(binary);
+}
+
+/**
+ * #578 — Replace ` ```mermaid ... ``` ` / ` ~~~mermaid ... ~~~ ` fenced blocks
+ * in Markdown with rendered PNG `data:image/png;base64,...` images so Pandoc
+ * embeds crisp diagram images directly into EPUB / ODT / RTF outputs instead of
+ * showing raw Mermaid source code.
+ */
+export async function renderMermaidFencesInMarkdown(
+  markdown: string,
+  renderer: (source: string) => Promise<DiagramPng | null> = mermaidToPng,
+): Promise<string> {
+  if (!markdown || !/(?:`{3,}|~{3,})[ \t]*mermaid\b/i.test(markdown)) {
+    return markdown;
+  }
+  const lines = markdown.split(/\r?\n/);
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const rawLine = lines[i];
+    const openMatch = /^([ \t]*(?:>[ \t]*)*)(`{3,}|~{3,})[ \t]*([^\s`~]*)(.*)$/.exec(rawLine);
+    if (!openMatch) {
+      out.push(rawLine);
+      i++;
+      continue;
+    }
+    const indentPrefix = openMatch[1] || '';
+    const fenceMarker = openMatch[2];
+    const fenceChar = fenceMarker[0];
+    const fenceLen = fenceMarker.length;
+    const lang = (openMatch[3] || '').trim().toLowerCase();
+    const restInfo = openMatch[4] || '';
+    if (fenceChar === '`' && restInfo.includes('`')) {
+      out.push(rawLine);
+      i++;
+      continue;
+    }
+    // Find matching closing fence
+    let closeIdx = -1;
+    const bodyLines: string[] = [];
+    for (let j = i + 1; j < lines.length; j++) {
+      const candidate = lines[j];
+      const stripped = indentPrefix && candidate.startsWith(indentPrefix)
+        ? candidate.slice(indentPrefix.length)
+        : candidate.replace(/^[ \t]*(?:>[ \t]*)*/, '');
+      const closeMatch = new RegExp(`^[ \\t]*${fenceChar}{${fenceLen},}[ \\t]*$`).exec(stripped);
+      if (closeMatch) {
+        closeIdx = j;
+        break;
+      }
+      bodyLines.push(
+        indentPrefix && candidate.startsWith(indentPrefix)
+          ? candidate.slice(indentPrefix.length)
+          : candidate,
+      );
+    }
+    if (closeIdx < 0) {
+      out.push(rawLine);
+      i++;
+      continue;
+    }
+    if (lang === 'mermaid') {
+      const diagramCode = bodyLines.join('\n').trim();
+      const png = diagramCode ? await renderer(diagramCode) : null;
+      if (png && png.data.length > 0) {
+        const b64 = bytesToBase64(png.data);
+        out.push(`${indentPrefix}![](data:image/png;base64,${b64})`);
+        i = closeIdx + 1;
+        continue;
+      }
+    }
+    for (let k = i; k <= closeIdx; k++) {
+      out.push(lines[k]);
+    }
+    i = closeIdx + 1;
+  }
+  return out.join('\n');
 }
